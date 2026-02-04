@@ -1,0 +1,197 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "inkarms"
+version = "0.11.0"
+description = "AI Agent CLI tool with multi-provider support, skills, TUI, and secure execution"
+authors = [{ name = "digitalzany", email = "digitalzany@gmail.com" }]
+license = { text = "MIT" }
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = ["ai", "agents", "cli", "llm", "automation", "tui"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Utilities",
+    "Typing :: Typed",
+]
+
+dependencies = [
+    "typer>=0.9.0",
+    "textual>=0.47.0",
+    "litellm>=1.30.0",
+    "pydantic>=2.5.0",
+    "pyyaml>=6.0",
+    "rich>=13.0.0",
+    "httpx>=0.26.0",
+    "tiktoken>=0.5.0",
+    "cryptography>=42.0.0",
+    "questionary>=2.0.0",  # Interactive prompts for setup wizard
+]
+
+[project.optional-dependencies]
+sqlite = ["aiosqlite>=0.19.0"]
+platforms = [
+    "python-telegram-bot>=20.0",
+    "slack-sdk>=3.23.0",
+    "discord.py>=2.3.0",
+    "fastapi>=0.104.0",  # Optional - only for webhook server
+    "uvicorn>=0.24.0",   # Optional - only for webhook server
+]
+tools = [
+    "RestrictedPython>=6.2",  # For safe Python code execution
+    "GitPython>=3.1.0",        # For Git operations
+]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "ruff>=0.2.0",
+    "mypy>=1.8.0",
+    "pre-commit>=3.6.0",
+    "types-PyYAML>=6.0.0",
+]
+all = ["inkarms[sqlite,platforms,dev]"]
+
+[project.urls]
+Homepage = "https://github.com/digitalzany/inkarms"
+Repository = "https://github.com/digitalzany/inkarms"
+
+[project.scripts]
+inkarms = "inkarms.cli.app:main"
+
+[project.entry-points."inkarms.plugins"]
+# Placeholder for plugin entry points
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/inkarms"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/tests",
+    "/README.md",
+    "/LICENSE",
+]
+
+# =============================================================================
+# Ruff Configuration
+# =============================================================================
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "PTH",    # flake8-use-pathlib
+    "ERA",    # eradicate (commented out code)
+    "PL",     # Pylint
+    "RUF",    # Ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "PLR0913", # too many arguments
+    "PLR2004", # magic value comparison
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["inkarms"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG", "PLR2004", "PLC0415"]
+"src/inkarms/cli/commands/*" = ["ARG001"]  # Placeholder commands have unused args
+"src/inkarms/audit/logger.py" = ["PLW0603", "PLC0415"]  # Global variable needed for singleton, avoid circular imports
+"src/inkarms/security/whitelist.py" = ["PLR0911"]  # Multiple returns needed for clarity
+
+# =============================================================================
+# MyPy Configuration
+# =============================================================================
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+namespace_packages = true
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+module = [
+    "litellm.*",
+    "tiktoken.*",
+    "textual.*",
+    "telegram.*",
+    "slack_sdk.*",
+    "discord.*",
+    "fastapi.*",
+    "uvicorn.*",
+    "inkarms.security.*",
+    "inkarms.audit.*",
+]
+ignore_missing_imports = true
+
+# =============================================================================
+# Pytest Configuration
+# =============================================================================
+[tool.pytest.ini_options]
+minversion = "8.0"
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "-q",
+    "--strict-markers",
+    "--strict-config",
+]
+markers = [
+    "slow: marks tests as slow",
+    "integration: marks tests as integration tests",
+    "live: marks tests that require live API access",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+# =============================================================================
+# Coverage Configuration
+# =============================================================================
+[tool.coverage.run]
+source = ["src/inkarms"]
+branch = true
+omit = [
+    "*/__pycache__/*",
+    "*/tests/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@abstractmethod",
+]
+show_missing = true
