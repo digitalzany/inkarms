@@ -165,7 +165,8 @@ class ProviderSelectionScreen(Screen):
     }
 
     #provider-container {
-        width: 90;
+        width: 90%;
+        max-width: 90;
         height: auto;
         border: thick $primary;
         background: $surface;
@@ -382,7 +383,8 @@ class APIKeySetupScreen(Screen):
     }
 
     #apikey-container {
-        width: 90;
+        width: 90%;
+        max-width: 90;
         height: auto;
         border: thick $primary;
         background: $surface;
@@ -552,7 +554,8 @@ class SecurityConfigScreen(Screen):
     }
 
     #security-container {
-        width: 90;
+        width: 90%;
+        max-width: 90;
         height: auto;
         border: thick $primary;
         background: $surface;
@@ -705,7 +708,8 @@ class ToolsConfigScreen(Screen):
     }
 
     #tools-container {
-        width: 90;
+        width: 90%;
+        max-width: 90;
         height: auto;
         border: thick $primary;
         background: $surface;
@@ -822,7 +826,8 @@ class BuildingConfigScreen(Screen):
     }
 
     #building-container {
-        width: 80;
+        width: 90%;
+        max-width: 80;
         height: auto;
         border: thick $primary;
         background: $surface;
@@ -910,7 +915,8 @@ class SuccessScreen(Screen):
     }
 
     #success-container {
-        width: 90;
+        width: 90%;
+        max-width: 90;
         height: auto;
         border: thick $success;
         background: $surface;

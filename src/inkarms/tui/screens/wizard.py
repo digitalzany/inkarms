@@ -23,7 +23,8 @@ class ConfigWizardWelcome(Screen):
     }
 
     #welcome-container {
-        width: 80;
+        width: 90%;
+        max-width: 80;
         height: auto;
         border: thick $primary;
         background: $surface;

@@ -10,7 +10,7 @@ from pathlib import Path
 
 from textual import on, work
 from textual.app import ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, Horizontal
 from textual.screen import Screen
 from textual.widgets import (
     Button,
@@ -177,7 +177,8 @@ class ProviderConfigurationScreen(Screen):
     }
 
     #provider-config-container {
-        width: 90;
+        width: 90%;
+        max-width: 90;
         height: auto;
         border: thick $primary;
         background: $surface;
@@ -199,6 +200,7 @@ class ProviderConfigurationScreen(Screen):
 
     .input-group {
         margin: 1 0;
+        height: auto;
     }
 
     .input-label {
@@ -216,6 +218,7 @@ class ProviderConfigurationScreen(Screen):
         margin: 1 0;
         background: $panel;
         padding: 1;
+        height: auto;
     }
 
     Input {
@@ -226,6 +229,7 @@ class ProviderConfigurationScreen(Screen):
         layout: horizontal;
         align: center middle;
         margin-top: 2;
+        height: auto;
     }
 
     Button {
@@ -246,8 +250,8 @@ class ProviderConfigurationScreen(Screen):
         """Compose the provider configuration screen."""
         yield Header(show_clock=True)
 
-        with VerticalScroll(id="provider-config-container"):
-            yield Label("⚙️ Provider Configuration", classes="section-title")
+        with Container(id="provider-config-container"):
+            yield Label("⚙ Provider Configuration", classes="section-title")
             yield Label("Section 1 of 8", classes="section-progress")
 
             # Primary Provider Selection
@@ -396,7 +400,8 @@ class ContextManagementScreen(Screen):
     }
 
     #context-container {
-        width: 90;
+        width: 90%;
+        max-width: 90;
         height: auto;
         border: thick $primary;
         background: $surface;
@@ -418,6 +423,7 @@ class ContextManagementScreen(Screen):
 
     .input-group {
         margin: 1 0;
+        height: auto;
     }
 
     .input-label {
@@ -435,6 +441,7 @@ class ContextManagementScreen(Screen):
         margin: 1 0;
         background: $panel;
         padding: 1;
+        height: auto;
     }
 
     Input, Checkbox {
@@ -445,6 +452,7 @@ class ContextManagementScreen(Screen):
         layout: horizontal;
         align: center middle;
         margin-top: 2;
+        height: auto;
     }
 
     Button {
@@ -465,7 +473,7 @@ class ContextManagementScreen(Screen):
         """Compose the context management screen."""
         yield Header(show_clock=True)
 
-        with VerticalScroll(id="context-container"):
+        with Container(id="context-container"):
             yield Label("🧠 Context Management", classes="section-title")
             yield Label("Section 2 of 8", classes="section-progress")
 
@@ -534,7 +542,7 @@ class ContextManagementScreen(Screen):
                 )
                 yield Input(
                     value=str(self.state.handoff_threshold),
-                    placeholder="150000",
+                    placeholder="80000",
                     id="handoff-threshold-input",
                     type="integer"
                 )
@@ -593,16 +601,12 @@ class ContextManagementScreen(Screen):
         self.app.exit(message="Advanced wizard cancelled")
 
 
-# Shared CSS for all wizard screens
+# Shared CSS for all wizard screens (screen alignment defined per-screen)
 WIZARD_CSS = """
-Screen {
-    align: center middle;
-}
-
 .wizard-container {
-    width: 90;
+    width: 90%;
+    max-width: 90;
     height: auto;
-    max-height: 90%;
     border: thick $primary;
     background: $surface;
     padding: 2;
@@ -623,6 +627,7 @@ Screen {
 
 .input-group {
     margin: 1 0;
+    height: auto;
 }
 
 .input-label {
@@ -647,6 +652,7 @@ RadioSet {
     margin: 1 0;
     background: $panel;
     padding: 1;
+    height: auto;
 }
 
 Input, Checkbox {
@@ -657,6 +663,7 @@ Input, Checkbox {
     layout: horizontal;
     align: center middle;
     margin-top: 2;
+    height: auto;
 }
 
 Button {
@@ -668,7 +675,11 @@ Button {
 class SecurityAdvancedScreen(Screen):
     """Advanced Wizard Section 3 of 8: Security Configuration."""
 
-    CSS = WIZARD_CSS
+    CSS = """
+    SecurityAdvancedScreen {
+        align: center middle;
+    }
+    """ + WIZARD_CSS
 
     def __init__(self, state: AdvancedWizardState):
         super().__init__()
@@ -677,7 +688,7 @@ class SecurityAdvancedScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
 
-        with VerticalScroll(classes="wizard-container"):
+        with Container(classes="wizard-container"):
             yield Label("🔒 Security Configuration", classes="section-title")
             yield Label("Section 3 of 8", classes="section-progress")
 
@@ -781,7 +792,11 @@ class SecurityAdvancedScreen(Screen):
 class ToolConfigurationScreen(Screen):
     """Advanced Wizard Section 4 of 8: Tool Configuration."""
 
-    CSS = WIZARD_CSS
+    CSS = """
+    ToolConfigurationScreen {
+        align: center middle;
+    }
+    """ + WIZARD_CSS
 
     def __init__(self, state: AdvancedWizardState):
         super().__init__()
@@ -790,7 +805,7 @@ class ToolConfigurationScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
 
-        with VerticalScroll(classes="wizard-container"):
+        with Container(classes="wizard-container"):
             yield Label("🔧 Tool Configuration", classes="section-title")
             yield Label("Section 4 of 8", classes="section-progress")
 
@@ -904,7 +919,11 @@ class ToolConfigurationScreen(Screen):
 class SkillsConfigurationScreen(Screen):
     """Advanced Wizard Section 5 of 8: Skills Configuration."""
 
-    CSS = WIZARD_CSS
+    CSS = """
+    SkillsConfigurationScreen {
+        align: center middle;
+    }
+    """ + WIZARD_CSS
 
     def __init__(self, state: AdvancedWizardState):
         super().__init__()
@@ -913,7 +932,7 @@ class SkillsConfigurationScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
 
-        with VerticalScroll(classes="wizard-container"):
+        with Container(classes="wizard-container"):
             yield Label("📚 Skills Configuration", classes="section-title")
             yield Label("Section 5 of 8", classes="section-progress")
 
@@ -1003,7 +1022,11 @@ class SkillsConfigurationScreen(Screen):
 class CostManagementScreen(Screen):
     """Advanced Wizard Section 6 of 8: Cost Management."""
 
-    CSS = WIZARD_CSS
+    CSS = """
+    CostManagementScreen {
+        align: center middle;
+    }
+    """ + WIZARD_CSS
 
     def __init__(self, state: AdvancedWizardState):
         super().__init__()
@@ -1012,7 +1035,7 @@ class CostManagementScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
 
-        with VerticalScroll(classes="wizard-container"):
+        with Container(classes="wizard-container"):
             yield Label("💰 Cost Management", classes="section-title")
             yield Label("Section 6 of 8", classes="section-progress")
 
@@ -1113,7 +1136,11 @@ class CostManagementScreen(Screen):
 class TUIPreferencesScreen(Screen):
     """Advanced Wizard Section 7 of 8: TUI Preferences."""
 
-    CSS = WIZARD_CSS
+    CSS = """
+    TUIPreferencesScreen {
+        align: center middle;
+    }
+    """ + WIZARD_CSS
 
     def __init__(self, state: AdvancedWizardState):
         super().__init__()
@@ -1122,7 +1149,7 @@ class TUIPreferencesScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
 
-        with VerticalScroll(classes="wizard-container"):
+        with Container(classes="wizard-container"):
             yield Label("🎨 TUI Preferences", classes="section-title")
             yield Label("Section 7 of 8", classes="section-progress")
 
@@ -1187,7 +1214,11 @@ class TUIPreferencesScreen(Screen):
 class GeneralSettingsScreen(Screen):
     """Advanced Wizard Section 8 of 8: General Settings."""
 
-    CSS = WIZARD_CSS
+    CSS = """
+    GeneralSettingsScreen {
+        align: center middle;
+    }
+    """ + WIZARD_CSS
 
     def __init__(self, state: AdvancedWizardState):
         super().__init__()
@@ -1196,7 +1227,7 @@ class GeneralSettingsScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
 
-        with VerticalScroll(classes="wizard-container"):
+        with Container(classes="wizard-container"):
             yield Label("⚙️ General Settings", classes="section-title")
             yield Label("Section 8 of 8", classes="section-progress")
 
@@ -1275,9 +1306,9 @@ class ConfigPreviewScreen(Screen):
     }
 
     .preview-container {
-        width: 100;
+        width: 90%;
+        max-width: 100;
         height: auto;
-        max-height: 90%;
         border: thick $primary;
         background: $surface;
         padding: 2;
@@ -1316,6 +1347,7 @@ class ConfigPreviewScreen(Screen):
         layout: horizontal;
         align: center middle;
         margin-top: 2;
+        height: auto;
     }
 
     Button {
@@ -1330,7 +1362,7 @@ class ConfigPreviewScreen(Screen):
     def compose(self) -> ComposeResult:
         yield Header(show_clock=True)
 
-        with VerticalScroll(classes="preview-container"):
+        with Container(classes="preview-container"):
             yield Label("📋 Configuration Preview", classes="section-title")
 
             with Container(classes="config-preview"):
@@ -1474,7 +1506,8 @@ class BuildingAdvancedConfigScreen(Screen):
     }
 
     .building-container {
-        width: 60;
+        width: 90%;
+        max-width: 60;
         height: auto;
         border: thick $primary;
         background: $surface;
@@ -1565,7 +1598,8 @@ class AdvancedSuccessScreen(Screen):
     }
 
     .success-container {
-        width: 80;
+        width: 90%;
+        max-width: 80;
         height: auto;
         border: thick $success;
         background: $surface;

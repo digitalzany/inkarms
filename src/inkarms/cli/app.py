@@ -15,7 +15,7 @@ from inkarms.cli.commands import audit, config, memory, platforms, profile, run,
 # Create the main Typer app
 app = typer.Typer(
     name="inkarms",
-    help="AI Agent CLI tool with multi-provider support, skills, and TUI.",
+    help="Your local AI Agent with multi-provider support, skills, and TUI.",
     no_args_is_help=True,
     rich_markup_mode="rich",
     pretty_exceptions_enable=True,
