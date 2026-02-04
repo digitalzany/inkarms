@@ -1,429 +1,159 @@
-# 🐙 InkArms - AI Agent CLI Tool
+# 🐙 InkArms
 
 <p align="center">
-  <em>Think with your arms. Act with intent. Leave your mark.</em>
+  <em>The AI Agent with 8 Arms, Infinite Ink, and Zero Intent to Destroy Your Filesystem.</em>
 </p>
 
 <p align="center">
   <picture>
-    <img src="./docs/assets/logo.png" alt="InkArms Logo" width="200" />
+    <img src="./docs/assets/logo.png" alt="InkArms Logo" width="250" />
   </picture>
 </p>
 
 <p align="center">
-  <a href="https://github.com/digitalzany/inkarms/actions"><img src="https://img.shields.io/github/actions/workflow/status/digitalzany/inkarms/ci.yml?branch=main&style=for-the-badge" alt="Build Status"></a>
-  <a href="https://github.com/digitalzany/inkarms/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
+  <a href="https://github.com/digitalzany/inkarms/actions"><img src="https://img.shields.io/github/actions/workflow/status/digitalzany/inkarms/ci.yml?branch=main&style=flat-square" alt="Build Status"></a>
+  <a href="https://github.com/digitalzany/inkarms/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-purple?style=flat-square" alt="MIT License"></a>
+  <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json" alt="Ruff"></a>
 </p>
 
 ---
 
-## What is InkArms?
+## 🌊 What is this thing?
 
-**InkArms** is an AI Agent CLI tool inspired by the magnificent octopus — a creature that doesn't just think with its head, but with its *arms*.
+**InkArms** is an AI Agent CLI that acts like an octopus: it has a central brain (the LLM) but uses independent **arms** (Tools) to get stuff done.
 
-Each arm of an octopus has its own mini-brain, capable of independent action while coordinating with the whole. InkArms brings this philosophy to AI agents:
+Most AI tools are just chatboxes. They talk a big game but can't *do* anything. InkArms is different. It doesn't just hallucinate code; it **runs it** (safely), **tests it**, **commits it**, and then **tells you about it** on Slack.
 
-- **Ink** represents memory, trace, and intent — every action leaves a mark
-- **Arms** represent action, parallelism, and execution — multiple capabilities working in concert
+> **Philosophy:** InkArms doesn't "chat." It **acts**, **remembers**, and **leaves a paper trail**.
 
-> InkArms doesn't "chat" — it **acts**, **remembers**, and **leaves records**.
+## ✨ Why InkArms?
 
-```
-         ___
-       /     \
-      |   o o |
-    /|\   ||   /|\
-   / | \  ||  / | \
-  |  |  | || |  |  |    "I have 8 arms and I'm not afraid to use them!"
-  |  |  | || |  |  |
-    /   | || |   \  
-   /   /  ||  \   \
-```
+| Feature |       Standard Chatbot 🤖       | InkArms 🐙 |
+| :--- |:-------------------------------:| :---: |
+| **Execution** | "Here is some code (good luck)" | "I ran the code. It failed. I fixed it. It works now." |
+| **Memory** | Forgets you after context limit | **Persistent Memory** & Handoffs. It remembers. |
+| **Security** |          None or weak           | **Sandbox**, Whitelists, & Audit Logs. |
+| **Reach** |        Browser Tab, CLI         | **CLI, TUI, Telegram, Slack, Discord**. |
+| **Vibe** |       Corporate & Sterile       | **Cephalopod Chaos (Controlled)**. |
 
-## Why InkArms?
+## 🛡️ Safe by Design (The "No Skynet" Promise)
 
-Most AI tools are glorified chatbots. You ask, they answer, and poof — the conversation vanishes like ink in water.
+We know giving an AI access to your terminal sounds like the start of a sci-fi horror movie. That's why InkArms is built with **paranoia-first security**:
 
-InkArms is different:
+1.  **The Sandbox 📦:** All commands run in a restricted execution environment. `rm -rf /` is not just discouraged; it's physically impossible in default modes.
+2.  **The Bouncer (Whitelist) 📋:** By default, InkArms only knows a handful of safe moves (`ls`, `cat`, `git status`). You have to explicitly teach it dangerous moves.
+3.  **The Paper Trail (Audit Logs) 🕵️:** Every single action—every file read, every command run, every API call—is logged to a local, immutable JSONL ledger. You can replay the entire crime scene (or success story).
+4.  **Local Secrets 🔐:** Your API keys are encrypted at rest on your machine using Fernet symmetric encryption. We don't see them. The AI doesn't see them until the millisecond it needs them.
 
-- **Multi-Provider Support** — Anthropic, OpenAI, Google, Ollama, and more via LiteLLM
-- **Multi-Platform Messaging** — Chat with your AI via Telegram, Slack, Discord, and more (no static IP required!)
-- **Skills System** — Teach your AI new tricks with portable, shareable skill files
-- **Deep Thinking** — Chain multiple models for thorough analysis
-- **Smart Routing** — Automatically pick the best model for each task
-- **Secure Sandbox** — Commands execute safely with whitelist protection
-- **Persistent Memory** — Sessions are logged, handoffs are preserved
-- **Beautiful TUI** — A terminal interface that sparks joy
+## 🚀 Quick Start
 
-## Quick Start
-
-### Installation
+### 1. Install (The Easy Part)
 
 ```bash
-# From PyPI (coming soon)
+# Get the core
 pip install inkarms
 
-# With platform messaging support (Telegram, Slack, Discord, etc.)
-pip install inkarms[platforms]
-
-# From source (for the adventurous)
-git clone https://github.com/digitalzany/inkarms.git
-cd inkarms
-pip install -e ".[dev]"
-
-# From source with platforms
-pip install -e ".[platforms,dev]"
+# Get the superpowers (Telegram, Slack, Discord support)
+pip install "inkarms[platforms]"
 ```
 
-### Your First Tentacle Wave
+### 2. Wake the Kraken
 
 ```bash
-# Check if InkArms is ready to embrace you
-inkarms --version
-
-# See all the arms at your disposal
-inkarms --help
-
-# Initialize with interactive wizard
+# Initialize your config (and secrets)
 inkarms config init
 
-# Ask InkArms to do something (requires API key setup)
-inkarms run "Explain quantum computing like I'm a curious octopus"
-
-# Launch the interactive chat interface
+# Interactive mode (The TUI - It's pretty)
 inkarms chat
+
+# One-off command
+inkarms run "Check the git status of this repo and summarize the last 5 commits" --tools
 ```
 
-### Configuration
+### 3. Connect the Tentacles (Messaging)
 
-InkArms looks for configuration in these places (in order of priority):
-
-1. CLI flags (`--model`, `--profile`, etc.)
-2. Environment variables (`INKARMS_*`)
-3. Project config (`./.inkarms/project.yaml`)
-4. Active profile (`~/.inkarms/profiles/<name>.yaml`)
-5. Global config (`~/.inkarms/config.yaml`)
-
-### Initialize InkArms
+Want to chat with your agent from the grocery store? InkArms supports **polling** and **sockets**, meaning **NO static IP** and **NO webhooks** required.
 
 ```bash
-# Initialize InkArms (creates ~/.inkarms/ directory and config)
-inkarms config init
-
-# Or initialize with a project config
-inkarms config init --project
-```
-
-### Set up your first API key:
-
-```bash
-# Option 1: Environment variable
-export ANTHROPIC_API_KEY="your-key-here"
-
-# Option 2: Encrypted secrets storage
-inkarms config set-secret anthropic
-# You'll be prompted to enter your key securely
-
-# List configured secrets
-inkarms config list-secrets
-```
-
-### View and validate configuration:
-
-```bash
-# Show current configuration
-inkarms config show
-
-# Show specific section
-inkarms config show providers
-
-# Validate configuration
-inkarms config validate
-```
-
-Create a minimal config:
-
-```yaml
-# ~/.inkarms/config.yaml
-providers:
-  default: "anthropic/claude-sonnet-4-20250514"
-  aliases:
-    fast: "openai/gpt-3.5-turbo"
-    smart: "anthropic/claude-opus-4-20250514"
-
-security:
-  sandbox:
-    enable: true
-    mode: whitelist
-  whitelist:
-    - ls
-    - cat
-    - git
-    - python
-```
-
-## Features
-
-### Skills System
-
-Skills are portable instructions that teach InkArms specialized tasks:
-
-```bash
-# Install a skill from GitHub
-inkarms skill install github:inkarms/skills/security-scan
-
-# List your skills
-inkarms skill list
-
-# Use a skill explicitly
-inkarms run "Review my code" --skill security-scan
-```
-
-### Tool Use & Agent Loop
-
-InkArms can now **execute tools** to accomplish complex tasks autonomously:
-
-```bash
-# Enable tool use (manual approval by default)
-inkarms run "List files in current directory" --tools
-
-# Auto-approve all tools
-inkarms run "Create hello.txt with 'Hello World'" --tools --tool-approval auto
-
-# List available tools
-inkarms tools list
-
-# Test a tool
-inkarms tools test read_file --params '{"path": "README.md"}'
-
-# Show tool details
-inkarms tools info execute_bash
-```
-
-**Built-in Tools:**
-- **execute_bash** - Run shell commands through security sandbox
-- **read_file** - Read text files with encoding support
-- **write_file** - Create/overwrite files
-- **list_files** - List directory contents recursively
-- **search_files** - Glob and grep-like file search
-
-**Agent Loop Features:**
-- Iterative execution: AI → parse tools → execute → feed results → continue
-- Approval modes: AUTO (all tools), MANUAL (dangerous need approval), DISABLED
-- Tool filtering via whitelist/blacklist
-- All tools execute through security sandbox
-- Complete audit logging
-
-**Advanced Tool Use:**
-- **HTTP requests** - Make API calls with authentication
-- **Python eval** - Safe code execution
-- **Git operations** - Clone, status, diff, log commands
-- **Streaming** - Real-time tool execution updates
-- **Parallel execution** - Run independent tools concurrently
-- **Tool metrics** - Track execution time, success rates
-
-### Multi-Platform Messaging
-
-Chat with InkArms through your favorite messaging platforms! **No static IP or webhook setup required** - everything uses polling or WebSocket modes that work seamlessly on your personal computer:
-
-```bash
-# Install platform support
-pip install -e ".[platforms]"
-
-# Configure your bots (one-time setup)
+# 1. Set your bot token
 inkarms config set-secret telegram-bot-token
-inkarms config set-secret slack-bot-token
-inkarms config set-secret discord-bot-token
 
-# Start all enabled platforms
+# 2. Start the bridge
 inkarms platforms start
-
-# Check platform status
-inkarms platforms status
 ```
 
-**Supported Platforms:**
-- ✅ **Telegram** - Long polling (perfect for personal use)
-- ✅ **Slack** - Socket Mode (works behind firewalls)
-- ✅ **Discord** - Gateway WebSocket (standard bot connection)
-- 📋 **iMessage** - macOS local monitoring (optional)
-- 📋 **Signal** - via signal-cli (optional)
-- 📋 **WhatsApp** - Personal use alternatives (optional)
+*Boom. You're now debugging your server from Telegram.*
 
-**Key Benefits:**
-- No static IP address needed
-- No domain or SSL certificates required
-- Works behind NAT/firewalls
-- Each user gets isolated conversation sessions
-- Rate limiting prevents abuse
-- All security features apply (sandbox, audit logging)
+## 🧠 Features
 
-See [Platform Setup Guide](docs/platforms.md) for detailed configuration per platform.
+### 🛠️ The Arms (Tools)
+InkArms comes with batteries included:
+*   **Bash:** Execute shell commands (safely).
+*   **File Ops:** Read, write, and search files (with encoding smarts).
+*   **Git:** Clone, commit, diff, and log.
+*   **Python:** Run safe, sandboxed Python snippets for math/logic.
+*   **HTTP:** Browse the web, hit APIs.
 
-### Deep Thinking
-
-When one brain isn't enough, chain multiple models:
-
+### 🧩 The Skills
+Teach InkArms new tricks using **Skill Files** (`SKILL.md` + `skill.yaml`). It's like `docker-compose` for AI capabilities.
 ```bash
-# Enable deep thinking for thorough analysis
-inkarms run "Design a distributed system architecture" --deep
+inkarms skill install github:inkarms/skills/security-scan
+inkarms run "Audit this directory" --skill security-scan
 ```
 
-### Memory & Handoffs
+### 📝 Persistent Memory & Context
+Unlike standard LLM scripts that forget you instantly, InkArms keeps track of your conversation.
+*   **Auto-Compaction:** Automatically summarizes old context to save tokens while keeping the "gist".
+*   **Handoffs:** Saves state to `HANDOFF.md` when things get too complex, allowing you to "reboot" the agent with fresh context but full history.
+*   **Session Logs:** Every session is saved to a local SQLite database or file for later review.
 
-InkArms never forgets (unless you ask nicely):
+### 🖥️ TUI & Wizard
+We believe terminal tools should be pretty.
+*   **Interactive Setup:** `inkarms config init` runs a wizard that guides you through provider selection and security settings.
+*   **Chat Interface:** `inkarms chat` launches a full-featured terminal chat app with streaming responses, syntax highlighting, and real-time tool execution status.
 
-```bash
-# View your conversation memory
-inkarms memory list
+### 🔌 Provider Agnostic (LiteLLM)
+Don't get locked into one vendor. InkArms sits on top of [LiteLLM](https://github.com/BerriAI/litellm), giving you instant access to 100+ models.
+*   **Switch Instantly:** `inkarms run "query" --model ollama/llama3` or `--model anthropic/claude-3-opus`.
+*   **Smart Fallbacks:** If OpenAI is down, automatically fail over to Anthropic or Azure.
+*   **Cost Tracking:** See exactly how much each command costs before you run it (optional).
 
-# Check current session status
-inkarms memory status
+## 📚 Documentation
 
-# Create a snapshot for later
-inkarms memory snapshot "api-design-discussion"
+Detailed documentation is available in the `docs/` directory:
 
-# Compact context when it gets too large
-inkarms memory compact --strategy summarize
+- [**User Guide**](docs/user_guide.md) — Getting started
+- [**TUI Guide**](docs/tui_guide.md) — Chat interface & config wizard
+- [**Platform Setup**](docs/platforms.md) — Telegram, Slack, Discord
+- [**Advanced Tools**](docs/advanced_tool_use.md) — HTTP, Python, Git
+- [**Security & Sandbox**](docs/security.md) — Safety features
+- [**Configuration**](docs/configuration.md) — Settings reference
+- [**Skill Authoring**](docs/skill_authoring.md) — Create skills
+- [**CLI Reference**](docs/cli_reference.md) — Command list
 
-# When context gets full, create a handoff
-inkarms memory handoff
+## 🗺️ Roadmap
 
-# Recover from a handoff
-inkarms memory recover
-```
+- [x] **Phase 1: Foundation** (Config, Providers, Basic Tools, TUI, Platforms) ✅
+- [ ] **Phase 2: Intelligence** (Deep Thinking, Auto-Routing, Plugin System) 🚧
+- [ ] **Phase 3: Ecosystem** (Skill Marketplace, Team Profiles)
+- [ ] **Phase 4: Global Domination** (Just kidding. Maybe.)
 
-### Status & Monitoring
+## 🤝 Contributing
 
-Keep track of your tentacle activities:
-
-```bash
-# Check provider health
-inkarms status health
-
-# Check all configured providers
-inkarms status health --all
-
-# View session token usage
-inkarms status tokens
-
-# View session costs
-inkarms status cost
-```
-
-## Project Status
-
-InkArms Phase 1 is complete! Here's our roadmap:
-
-### Phase 1: Foundation (MVP) ✅
-- [x] Project structure and CLI skeleton
-- [x] Configuration system (hierarchical loading, profiles, validation)
-- [x] Provider layer (LiteLLM integration, fallbacks, secrets, cost tracking)
-- [x] Basic skills (loading, parsing, injection)
-- [x] Context management (token tracking, compaction, handoffs)
-- [x] Security sandbox (whitelist enforcement, path restrictions, audit logging)
-- [x] Multi-platform messaging (Telegram, Slack, Discord with polling/WebSocket)
-- [x] Tool use & agent loop (bash, file ops, search tools with approval system)
-- [x] Advanced tool use (HTTP, Python eval, Git tools, streaming, parallel execution)
-- [x] TUI v1 (chat interface, interactive config wizard)
-
-### Phase 2: Intelligence
-- [ ] Deep thinking chains
-- [ ] LLM-based task classification
-- [ ] Smart skill index
-- [ ] Plugin system
-
-### Phase 3: Ecosystem
-- [ ] Skill marketplace
-- [ ] Team profiles
-- [ ] Advanced audit & compliance
-
-### Phase 4: Advanced
-- [ ] TUI v2 (multi-pane, themes)
-- [ ] Async deep thinking
-- [ ] CI/CD integration
-
-## Documentation
-
-- [User Guide](docs/user_guide.md) — Get started with InkArms
-- [TUI Guide](docs/tui_guide.md) — Interactive chat and configuration wizard
-- [Platform Setup](docs/platforms.md) — Telegram, Slack, Discord integration
-- [Advanced Tool Use](docs/advanced_tool_use.md) — HTTP, Python, Git tools
-- [GitHub Copilot](docs/github_copilot.md) — Use GitHub Copilot as provider
-- [Configuration Reference](docs/configuration.md) — All the knobs and dials
-- [Security & Sandbox](docs/security.md) — Security features and audit logging
-- [Skill Authoring](docs/skill_authoring.md) — Teach InkArms new tricks
-- [CLI Reference](docs/cli_reference.md) — Every command, fully documented
-
-## Contributing
-
-We welcome contributions from fellow cephalopod enthusiasts!
+We welcome all contributors! Whether you have 2 arms or 8.
 
 ```bash
-# Clone the repo
 git clone https://github.com/digitalzany/inkarms.git
 cd inkarms
-
-# Install with dev dependencies
 pip install -e ".[dev]"
-
-# Run tests
-pytest
-
-# Run linting
-ruff check src/ tests/
-
-# Install pre-commit hooks
-pre-commit install
+pytest  # If the tests pass, you may pass.
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed guidelines.
+## 📄 License
 
-## Maintainers
-
-<table>
-  <tr>
-    <td align="center">
-      <a href="https://github.com/digitalzany">
-        <img src="https://github.com/digitalzany.png" width="100px;" alt="Ivan K"/>
-        <br />
-        <sub><b>digitalzany</b></sub>
-      </a>
-      <br />
-      <sub>Creator</sub>
-    </td>
-  </tr>
-</table>
-
-## Philosophy
-
-```
-An octopus doesn't wait for permission.
-It reaches out, explores, and adapts.
-Each arm thinks independently,
-yet all work toward a common goal.
-
-InkArms embodies this spirit:
-- Act decisively, but safely
-- Remember everything important
-- Leave traces of your work
-- Coordinate multiple capabilities
-- Adapt to any challenge
-
-Be the octopus.
-```
-
-## License
-
-MIT License — See [LICENSE](LICENSE) for details.
+MIT. Do whatever you want, just don't blame us if your octopus learns to trade crypto.
 
 ---
-
 <p align="center">
-  <em>Built with 8 arms and lots of ❤️</em>
-</p>
-
-<p align="center">
-  <a href="https://github.com/digitalzany/inkarms/issues">Issues</a> •
-  <a href="https://discord.gg/inkarms">Discord</a>
+  <em>"I don't chat. I act." — InkArms</em>
 </p>
