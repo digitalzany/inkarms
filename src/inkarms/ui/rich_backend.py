@@ -148,8 +148,10 @@ class CommandCompleter(Completer):
 COMMAND_COMPLETER = CommandCompleter()
 
 
-def _render_markdown(text: str, width: int = 80) -> str:
-    """Render markdown text to ANSI-formatted string using Rich."""
+def _render_markdown_to_tuples(text: str, width: int = 100) -> list:
+    """Convert markdown to prompt_toolkit style tuples via Rich ANSI output."""
+    from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+
     console = Console(
         file=io.StringIO(),
         force_terminal=True,
@@ -159,7 +161,8 @@ def _render_markdown(text: str, width: int = 80) -> str:
     )
     md = Markdown(text, code_theme="monokai")
     console.print(md)
-    return console.file.getvalue()
+    ansi_output = console.file.getvalue()
+    return list(to_formatted_text(ANSI(ansi_output)))
 
 
 # =============================================================================
@@ -847,8 +850,7 @@ class _ChatView:
         self.streaming_content = ""
         self.app: Application | None = None
         self.scroll_offset = 0
-        self.chat_buffer: Buffer | None = None
-        self._update_chat_buffer = lambda: None  # Will be set in run()
+        self.total_lines = 0
 
     def _get_history_text(self):
         """Format message history for display - same pattern as working demo."""
@@ -1023,50 +1025,57 @@ class _ChatView:
             height=1,
         )
 
-        # Create a scrollable chat area that fills available space
-        from prompt_toolkit.layout.controls import BufferControl
-        from prompt_toolkit.document import Document
-
-        # Use a Buffer for the chat content - this enables proper scrolling
-        self.chat_buffer = Buffer(read_only=True)
-
-        def update_chat_buffer():
-            """Update chat buffer with current messages."""
+        def get_formatted_chat():
+            """Get chat content with markdown rendering (works during streaming)."""
             lines = []
             messages = self.backend._messages
 
             if not messages and not self.streaming:
-                lines.append("  Start typing to chat...")
-                lines.append("  Type /help for commands")
-            else:
-                for msg in messages:
-                    ts = f"[{msg.timestamp}] " if msg.timestamp and self.backend.config.show_timestamps else ""
-                    if msg.role == "user":
-                        lines.append(f"{ts}You: {msg.content}")
-                        lines.append("")
-                    else:
-                        lines.append(f"{ts}Assistant: {msg.content}")
-                        lines.append("")
+                lines.append(('class:info', '  Start typing to chat...\n'))
+                lines.append(('class:hint', '  Type /help for commands\n'))
+                return lines
 
+            # Render completed messages with markdown
+            for msg in messages:
+                ts = f"[{msg.timestamp}] " if msg.timestamp and self.backend.config.show_timestamps else ""
+                if msg.role == "user":
+                    if ts:
+                        lines.append(('class:info', ts))
+                    lines.append(('class:user', 'You: '))
+                    lines.append(('', f'{msg.content}\n\n'))
+                else:
+                    if ts:
+                        lines.append(('class:info', ts))
+                    lines.append(('class:assistant', 'Assistant:\n'))
+                    # Render markdown for assistant messages
+                    try:
+                        md_tuples = _render_markdown_to_tuples(msg.content)
+                        lines.extend(md_tuples)
+                    except Exception:
+                        lines.append(('', msg.content))
+                    lines.append(('', '\n\n'))
+
+            # Render streaming content WITH markdown in real-time
             if self.streaming:
-                content = self.streaming_content if self.streaming_content else "thinking..."
-                lines.append(f"Assistant: {content}▌")
+                lines.append(('class:assistant', 'Assistant:\n'))
+                if self.streaming_content:
+                    try:
+                        md_tuples = _render_markdown_to_tuples(self.streaming_content)
+                        lines.extend(md_tuples)
+                    except Exception:
+                        lines.append(('', self.streaming_content))
+                    lines.append(('class:info', '▌\n'))
+                else:
+                    lines.append(('class:info', 'thinking...▌\n'))
 
             if self.pending_message:
-                lines.append("")
-                lines.append(f"  {self.pending_message}")
+                lines.append(('class:warning', f'\n  {self.pending_message}\n'))
 
-            text = "\n".join(lines)
-            self.chat_buffer.set_document(Document(text, len(text)), bypass_readonly=True)
+            return lines
 
-        # Initial update
-        update_chat_buffer()
-
-        # Store update function for later use
-        self._update_chat_buffer = update_chat_buffer
-
+        # Use FormattedTextControl for styled markdown output
         chat_window = Window(
-            content=BufferControl(buffer=self.chat_buffer, focusable=True),
+            content=FormattedTextControl(get_formatted_chat),
             wrap_lines=True,
         )
 
@@ -1113,16 +1122,12 @@ class _ChatView:
         # Handle commands
         if text.startswith("/"):
             self._handle_command(text)
-            self._update_chat_buffer()
             return
 
         # Regular message - add to history
         self.backend.add_message("user", text)
-        self._update_chat_buffer()
-
-        # Scroll to bottom
-        if self.chat_buffer:
-            self.chat_buffer.cursor_position = len(self.chat_buffer.text)
+        if self.app:
+            self.app.invalidate()
 
         # Start streaming response
         self.streaming = True
@@ -1130,10 +1135,6 @@ class _ChatView:
 
         def on_chunk(chunk):
             self.streaming_content += chunk
-            self._update_chat_buffer()
-            # Keep cursor at bottom
-            if self.chat_buffer:
-                self.chat_buffer.cursor_position = len(self.chat_buffer.text)
             if self.app:
                 self.app.invalidate()
 
@@ -1141,10 +1142,6 @@ class _ChatView:
             self.streaming = False
             self.streaming_content = ""
             self.backend.add_message("assistant", full_response)
-            self._update_chat_buffer()
-            # Keep cursor at bottom
-            if self.chat_buffer:
-                self.chat_buffer.cursor_position = len(self.chat_buffer.text)
             if self.app:
                 self.app.invalidate()
 
@@ -1152,7 +1149,6 @@ class _ChatView:
             self.streaming = False
             self.streaming_content = ""
             self.pending_message = f"Error: {error}"
-            self._update_chat_buffer()
             if self.app:
                 self.app.invalidate()
 
