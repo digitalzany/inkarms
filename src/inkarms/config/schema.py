@@ -9,7 +9,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
 # =============================================================================
 # System Prompt Configuration
 # =============================================================================
@@ -301,7 +300,29 @@ class CostConfig(BaseModel):
 
 
 # =============================================================================
-# TUI Configuration
+# UI Configuration (Unified UI Backend)
+# =============================================================================
+
+
+class UIConfig(BaseModel):
+    """Unified UI configuration for pluggable backends."""
+
+    model_config = ConfigDict(extra="allow")
+
+    # Backend selection: "auto", "rich", "textual"
+    backend: Literal["auto", "rich", "textual"] = "auto"
+
+    # Display settings
+    theme: str = "default"
+    show_status_bar: bool = True
+    show_timestamps: bool = True
+    max_messages_display: int = Field(default=20, ge=5, le=100)
+    enable_mouse: bool = True
+    enable_completion: bool = True
+
+
+# =============================================================================
+# TUI Configuration (Legacy - for backward compatibility)
 # =============================================================================
 
 
@@ -610,6 +631,7 @@ class Config(BaseModel):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     cost: CostConfig = Field(default_factory=CostConfig)
+    ui: UIConfig = Field(default_factory=UIConfig)
     tui: TuiConfig = Field(default_factory=TuiConfig)
     platforms: PlatformsConfig = Field(default_factory=PlatformsConfig)
     general: GeneralConfig = Field(default_factory=GeneralConfig)

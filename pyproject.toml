@@ -27,18 +27,18 @@ classifiers = [
 
 dependencies = [
     "typer>=0.9.0",
-    "textual>=0.47.0",
     "litellm>=1.30.0",
     "pydantic>=2.5.0",
     "pyyaml>=6.0",
     "rich>=13.0.0",
+    "prompt_toolkit>=3.0.0",  # Full-screen UI with input handling
     "httpx>=0.26.0",
     "tiktoken>=0.5.0",
     "cryptography>=42.0.0",
-    "questionary>=2.0.0",  # Interactive prompts for setup wizard
 ]
 
 [project.optional-dependencies]
+textual = ["textual>=0.47.0"]  # Optional TUI framework
 sqlite = ["aiosqlite>=0.19.0"]
 platforms = [
     "python-telegram-bot>=20.0",
@@ -60,7 +60,7 @@ dev = [
     "pre-commit>=3.6.0",
     "types-PyYAML>=6.0.0",
 ]
-all = ["inkarms[sqlite,platforms,dev]"]
+all = ["inkarms[textual,sqlite,platforms,tools,dev]"]
 
 [project.urls]
 Homepage = "https://github.com/digitalzany/inkarms"
@@ -120,8 +120,10 @@ known-first-party = ["inkarms"]
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ARG", "PLR2004", "PLC0415"]
 "src/inkarms/cli/commands/*" = ["ARG001"]  # Placeholder commands have unused args
+"src/inkarms/cli/app.py" = ["PLC0415", "B904", "ARG001"]  # Dynamic imports for lazy loading, typer callback args
 "src/inkarms/audit/logger.py" = ["PLW0603", "PLC0415"]  # Global variable needed for singleton, avoid circular imports
 "src/inkarms/security/whitelist.py" = ["PLR0911"]  # Multiple returns needed for clarity
+"src/inkarms/ui/*" = ["PLC0415", "F401", "ARG001", "ARG002", "ARG005", "B007", "RUF001", "RUF012", "PLR0912", "SIM102"]  # UI has dynamic imports, callback handlers, unicode chars, complex run loop
 
 # =============================================================================
 # MyPy Configuration
@@ -142,6 +144,7 @@ module = [
     "litellm.*",
     "tiktoken.*",
     "textual.*",
+    "prompt_toolkit.*",
     "telegram.*",
     "slack_sdk.*",
     "discord.*",
