@@ -9,6 +9,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from inkarms.config.providers import get_default_model
+
 # =============================================================================
 # System Prompt Configuration
 # =============================================================================
@@ -43,7 +45,7 @@ class ProviderConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    default: str = "anthropic/claude-sonnet-4-20250514"
+    default: str = Field(default_factory=get_default_model)
     fallback: list[str] = Field(default_factory=list)
     aliases: dict[str, str] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)

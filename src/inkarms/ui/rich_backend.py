@@ -30,6 +30,7 @@ from prompt_toolkit.layout import (
     Window,
     WindowAlign,
 )
+from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.output import ColorDepth
@@ -96,6 +97,7 @@ LOGO = """
 # Command Completer
 # =============================================================================
 
+
 class CommandCompleter(Completer):
     """Completer for slash commands with fuzzy matching."""
 
@@ -132,7 +134,7 @@ class CommandCompleter(Completer):
 
     def get_completions(self, document, complete_event):
         text = document.text_before_cursor.strip()
-        if not text.startswith('/'):
+        if not text.startswith("/"):
             return
 
         matches = []
@@ -165,9 +167,57 @@ def _render_markdown_to_tuples(text: str, width: int = 100) -> list:
     return list(to_formatted_text(ANSI(ansi_output)))
 
 
+def _render_markdown_ansi(text: str, width: int = 100) -> str:
+    """Render markdown to ANSI-formatted string using Rich."""
+    console = Console(
+        file=io.StringIO(),
+        force_terminal=True,
+        width=width,
+        color_system="256",
+        highlight=False,
+    )
+    md = Markdown(text, code_theme="monokai")
+    console.print(md)
+    return console.file.getvalue().rstrip()
+
+
+class AnsiLexer:
+    """Lexer that interprets ANSI escape codes and returns styled fragments."""
+
+    def lex_document(self, document):
+        """Return a function that returns styled fragments for a line."""
+        from prompt_toolkit.formatted_text import ANSI, to_formatted_text
+
+        lines = document.lines
+
+        def get_line(lineno):
+            if lineno < len(lines):
+                line = lines[lineno]
+                # Convert ANSI codes to styled fragments
+                try:
+                    formatted = list(to_formatted_text(ANSI(line + "\n")))
+                    # Remove trailing newline from fragments
+                    result = []
+                    for style, text in formatted:
+                        if text.endswith("\n"):
+                            text = text[:-1]
+                        if text:
+                            result.append((style, text))
+                    return result
+                except Exception:
+                    return [("", line)]
+            return []
+
+        return get_line
+
+    def invalidation_hash(self):
+        return None
+
+
 # =============================================================================
 # Rich Backend Implementation
 # =============================================================================
+
 
 class RichBackend(UIBackend):
     """Rich + prompt_toolkit UI backend implementation."""
@@ -201,6 +251,22 @@ class RichBackend(UIBackend):
 
     def initialize(self) -> None:
         """Initialize backend with InkArms core components."""
+        # Trigger background model update
+        try:
+            from inkarms.config.updater import fetch_and_update_models
+
+            def run_updater():
+                import asyncio
+
+                try:
+                    asyncio.run(fetch_and_update_models())
+                except Exception as e:
+                    logger.debug(f"Model updater failed: {e}")
+
+            threading.Thread(target=run_updater, daemon=True).start()
+        except Exception as e:
+            logger.debug(f"Failed to start model updater: {e}")
+
         try:
             from inkarms.config import get_config
             from inkarms.providers import get_provider_manager
@@ -347,13 +413,15 @@ class RichBackend(UIBackend):
         # This is handled by the chat view
         return None
 
-    def get_text_input(self, title: str, prompt: str = "> ",
-                       password: bool = False, default: str = "") -> str | None:
+    def get_text_input(
+        self, title: str, prompt: str = "> ", password: bool = False, default: str = ""
+    ) -> str | None:
         text_input = _TextInput(title, prompt, password, default)
         return text_input.run()
 
-    def get_selection(self, title: str, options: list[tuple[str, str, str]],
-                     subtitle: str = "") -> str | None:
+    def get_selection(
+        self, title: str, options: list[tuple[str, str, str]], subtitle: str = ""
+    ) -> str | None:
         menu = _Menu(title, options, subtitle)
         return menu.run()
 
@@ -563,16 +631,19 @@ class RichBackend(UIBackend):
                 def run_async():
                     import contextlib
                     import warnings
+
                     warnings.filterwarnings("ignore", category=RuntimeWarning)
 
                     loop = asyncio.new_event_loop()
                     loop.set_exception_handler(lambda lp, ctx: None)
                     asyncio.set_event_loop(loop)
                     try:
-                        return loop.run_until_complete(self._provider_manager.complete(
-                            messages=messages,
-                            model=self._status.model,
-                        ))
+                        return loop.run_until_complete(
+                            self._provider_manager.complete(
+                                messages=messages,
+                                model=self._status.model,
+                            )
+                        )
                     finally:
                         with contextlib.suppress(Exception):
                             loop.run_until_complete(loop.shutdown_asyncgens())
@@ -949,10 +1020,6 @@ class _ChatView:
     def run(self) -> UIView | None:
         from prompt_toolkit.widgets import Frame, TextArea
 
-        # Track scroll position manually
-        self.scroll_offset = 0
-        self.total_lines = 0
-
         # Input area with command completion
         input_area = TextArea(
             height=1,
@@ -976,46 +1043,63 @@ class _ChatView:
             self.exit_to = UIView.MENU
             event.app.exit()
 
+        # Scroll by moving cursor in the buffer (BufferControl native scrolling)
+        def scroll_chat_up(lines: int):
+            if self.chat_buffer:
+                doc = self.chat_buffer.document
+                # Move cursor up by `lines` lines
+                for _ in range(lines):
+                    new_pos = doc.get_cursor_up_position()
+                    if new_pos == 0 and self.chat_buffer.cursor_position == 0:
+                        break
+                    self.chat_buffer.cursor_position += new_pos
+                    doc = self.chat_buffer.document
+
+        def scroll_chat_down(lines: int):
+            if self.chat_buffer:
+                doc = self.chat_buffer.document
+                # Move cursor down by `lines` lines
+                for _ in range(lines):
+                    new_pos = doc.get_cursor_down_position()
+                    if new_pos == 0:
+                        break
+                    self.chat_buffer.cursor_position += new_pos
+                    doc = self.chat_buffer.document
+
         @kb.add('pageup')
-        def scroll_up(event):
-            self.scroll_offset = max(0, self.scroll_offset - 10)
-            event.app.invalidate()
+        def page_up(event):
+            scroll_chat_up(10)
 
         @kb.add('pagedown')
-        def scroll_down(event):
-            self.scroll_offset = min(self.scroll_offset + 10, max(0, self.total_lines - 5))
-            event.app.invalidate()
+        def page_down(event):
+            scroll_chat_down(10)
 
         @kb.add('c-u')
         def scroll_up_half(event):
-            self.scroll_offset = max(0, self.scroll_offset - 20)
-            event.app.invalidate()
+            scroll_chat_up(20)
 
         @kb.add('c-d')
         def scroll_down_half(event):
-            self.scroll_offset = min(self.scroll_offset + 20, max(0, self.total_lines - 5))
-            event.app.invalidate()
+            scroll_chat_down(20)
 
         @kb.add('home')
         def scroll_top(event):
-            self.scroll_offset = 0
-            event.app.invalidate()
+            if self.chat_buffer:
+                self.chat_buffer.cursor_position = 0
 
         @kb.add('end')
         def scroll_bottom(event):
-            self.scroll_offset = max(0, self.total_lines - 5)
-            event.app.invalidate()
+            if self.chat_buffer:
+                self.chat_buffer.cursor_position = len(self.chat_buffer.text)
 
-        # Mouse scroll support
+        # Mouse scroll support - move cursor to scroll the view
         @kb.add('<scroll-up>')
         def mouse_scroll_up(event):
-            self.scroll_offset = max(0, self.scroll_offset - 3)
-            event.app.invalidate()
+            scroll_chat_up(3)
 
         @kb.add('<scroll-down>')
         def mouse_scroll_down(event):
-            self.scroll_offset = min(self.scroll_offset + 3, max(0, self.total_lines - 5))
-            event.app.invalidate()
+            scroll_chat_down(3)
 
         # Layout
         header = Window(
@@ -1025,58 +1109,74 @@ class _ChatView:
             height=1,
         )
 
-        def get_formatted_chat():
-            """Get chat content with markdown rendering (works during streaming)."""
+        # Use Buffer + BufferControl for native scrolling
+        from prompt_toolkit.document import Document
+
+        self.chat_buffer = Buffer(read_only=True)
+
+        def update_chat_buffer():
+            """Update chat buffer with markdown-rendered content as ANSI text."""
             lines = []
             messages = self.backend._messages
 
             if not messages and not self.streaming:
-                lines.append(('class:info', '  Start typing to chat...\n'))
-                lines.append(('class:hint', '  Type /help for commands\n'))
-                return lines
+                lines.append('  Start typing to chat...')
+                lines.append('  Type /help for commands')
+            else:
+                for msg in messages:
+                    ts = (
+                        f"[{msg.timestamp}] "
+                        if msg.timestamp and self.backend.config.show_timestamps
+                        else ""
+                    )
+                    if msg.role == "user":
+                        lines.append(f"{ts}You: {msg.content}")
+                        lines.append("")
+                    else:
+                        lines.append(f"{ts}Assistant:")
+                        # Render markdown to plain text with ANSI via Rich
+                        try:
+                            rendered = _render_markdown_ansi(msg.content)
+                            lines.append(rendered)
+                        except Exception:
+                            lines.append(msg.content)
+                        lines.append("")
 
-            # Render completed messages with markdown
-            for msg in messages:
-                ts = f"[{msg.timestamp}] " if msg.timestamp and self.backend.config.show_timestamps else ""
-                if msg.role == "user":
-                    if ts:
-                        lines.append(('class:info', ts))
-                    lines.append(('class:user', 'You: '))
-                    lines.append(('', f'{msg.content}\n\n'))
-                else:
-                    if ts:
-                        lines.append(('class:info', ts))
-                    lines.append(('class:assistant', 'Assistant:\n'))
-                    # Render markdown for assistant messages
-                    try:
-                        md_tuples = _render_markdown_to_tuples(msg.content)
-                        lines.extend(md_tuples)
-                    except Exception:
-                        lines.append(('', msg.content))
-                    lines.append(('', '\n\n'))
-
-            # Render streaming content WITH markdown in real-time
             if self.streaming:
                 lines.append(('class:assistant', 'Assistant:\n'))
                 if self.streaming_content:
                     try:
-                        md_tuples = _render_markdown_to_tuples(self.streaming_content)
-                        lines.extend(md_tuples)
+                        rendered = _render_markdown_ansi(self.streaming_content)
+                        lines.append(rendered + "▌")
                     except Exception:
-                        lines.append(('', self.streaming_content))
-                    lines.append(('class:info', '▌\n'))
+                        lines.append(self.streaming_content + "▌")
                 else:
-                    lines.append(('class:info', 'thinking...▌\n'))
+                    lines.append("thinking...▌")
 
             if self.pending_message:
-                lines.append(('class:warning', f'\n  {self.pending_message}\n'))
+                lines.append("")
+                lines.append(f"  {self.pending_message}")
 
-            return lines
+            text = "\n".join(lines)
+            # Move cursor to end for auto-scroll
+            self.chat_buffer.set_document(Document(text, len(text)), bypass_readonly=True)
 
-        # Use FormattedTextControl for styled markdown output
+        # Initial update
+        update_chat_buffer()
+        self._update_chat_buffer = update_chat_buffer
+
+        chat_control = BufferControl(
+            buffer=self.chat_buffer,
+            focusable=True,
+            lexer=AnsiLexer(),
+        )
+
         chat_window = Window(
-            content=FormattedTextControl(get_formatted_chat),
+            content=chat_control,
             wrap_lines=True,
+            right_margins=[ScrollbarMargin(display_arrows=True)],
+            scroll_offsets=None,  # Let the window scroll freely
+            allow_scroll_beyond_bottom=True,
         )
 
         status_bar = Window(
@@ -1122,12 +1222,12 @@ class _ChatView:
         # Handle commands
         if text.startswith("/"):
             self._handle_command(text)
+            self._update_chat_buffer()
             return
 
         # Regular message - add to history
         self.backend.add_message("user", text)
-        if self.app:
-            self.app.invalidate()
+        self._update_chat_buffer()
 
         # Start streaming response
         self.streaming = True
@@ -1135,6 +1235,7 @@ class _ChatView:
 
         def on_chunk(chunk):
             self.streaming_content += chunk
+            self._update_chat_buffer()
             if self.app:
                 self.app.invalidate()
 
@@ -1142,6 +1243,7 @@ class _ChatView:
             self.streaming = False
             self.streaming_content = ""
             self.backend.add_message("assistant", full_response)
+            self._update_chat_buffer()
             if self.app:
                 self.app.invalidate()
 
@@ -1149,6 +1251,7 @@ class _ChatView:
             self.streaming = False
             self.streaming_content = ""
             self.pending_message = f"Error: {error}"
+            self._update_chat_buffer()
             if self.app:
                 self.app.invalidate()
 
@@ -1279,45 +1382,19 @@ class _ConfigWizard:
         self.backend = backend
 
     def run(self) -> bool:
+        from inkarms.config.providers import get_model_choices, get_provider_choices
+
         # Provider selection
         provider = self.backend.get_selection(
-            "Setup: Select Provider",
-            [
-                ("anthropic", "Anthropic Claude", "Recommended - best for coding"),
-                ("openai", "OpenAI GPT", "GPT-4o and GPT-4 Turbo"),
-                ("github_copilot", "GitHub Copilot", "Use existing Copilot subscription"),
-                ("ollama", "Ollama", "Local models, no API key needed"),
-            ],
-            "Choose your AI provider"
+            "Setup: Select Provider", get_provider_choices(), "Choose your AI provider"
         )
 
         if not provider:
             return False
 
         # Model selection
-        models = {
-            "anthropic": [
-                ("claude-sonnet-4-20250514", "Claude Sonnet 4", "Fast and capable"),
-                ("claude-opus-4-20250514", "Claude Opus 4", "Most capable"),
-            ],
-            "openai": [
-                ("gpt-4o", "GPT-4o", "Latest multimodal"),
-                ("gpt-4-turbo", "GPT-4 Turbo", "Fast and capable"),
-            ],
-            "github_copilot": [
-                ("gpt-4o", "GPT-4o", "Via Copilot"),
-                ("claude-sonnet-4-20250514", "Claude Sonnet 4", "Via Copilot"),
-            ],
-            "ollama": [
-                ("llama3.2", "Llama 3.2", "Meta's latest"),
-                ("mistral", "Mistral", "Fast and efficient"),
-            ],
-        }
-
         model = self.backend.get_selection(
-            "Setup: Select Model",
-            models.get(provider, [("default", "Default", "")]),
-            f"Choose model for {provider}"
+            "Setup: Select Model", get_model_choices(provider), f"Choose model for {provider}"
         )
 
         if not model:
@@ -1327,9 +1404,7 @@ class _ConfigWizard:
         api_key = None
         if provider != "ollama":
             api_key = self.backend.get_text_input(
-                f"Setup: {provider.title()} API Key",
-                "API Key: ",
-                password=True
+                f"Setup: {provider.title()} API Key", "API Key: ", password=True
             )
             if api_key is None:
                 return False

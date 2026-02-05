@@ -7,6 +7,7 @@ Built with Textual for beautiful terminal user interfaces.
 from textual.app import App
 from textual.binding import Binding
 
+from inkarms.config.updater import fetch_and_update_models
 from inkarms.tui.screens.wizard import ConfigWizardWelcome
 
 
@@ -39,6 +40,9 @@ class InkArmsApp(App):
 
     def on_mount(self) -> None:
         """Mount the appropriate screen based on mode."""
+        # Start background model update
+        self.run_worker(fetch_and_update_models(), thread=True)
+
         if self.mode == "wizard":
             self.push_screen(ConfigWizardWelcome(force=self.force))
         elif self.mode == "chat":

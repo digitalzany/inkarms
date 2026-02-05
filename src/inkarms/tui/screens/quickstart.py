@@ -13,6 +13,7 @@ from textual.containers import Container, Horizontal
 from textual.screen import Screen
 from textual.widgets import Button, Footer, Header, Input, Label, RadioButton, RadioSet
 
+from inkarms.config.providers import PROVIDERS, get_default_model
 from inkarms.secrets import SecretsManager
 from inkarms.storage.paths import get_global_config_path
 
@@ -26,7 +27,7 @@ class WizardState:
 
     # Provider settings
     provider: str = "anthropic"
-    model: str = "anthropic/claude-sonnet-4-20250514"
+    model: str = get_default_model()
     api_key: str = ""
     api_key_saved: bool = False
 
@@ -236,23 +237,16 @@ class ProviderSelectionScreen(Screen):
             yield Label("Choose your AI provider", id="step-description")
 
             with RadioSet(id="provider-choice"):
-                yield RadioButton("Anthropic Claude (Recommended)", id="anthropic", value=True)
-                yield Label(
-                    "Latest Claude models - Sonnet 4, Opus 4, Haiku",
-                    classes="provider-description"
-                )
+                # Dynamically populate providers
+                for provider_id, provider in PROVIDERS.items():
+                    # Only show recommended or popular providers in QuickStart?
+                    # For now, show all defined providers
+                    label = provider.name
+                    if "Recommended" in provider.description:
+                        label += " (Recommended)"
 
-                yield RadioButton("OpenAI", id="openai")
-                yield Label(
-                    "GPT-4, GPT-4o, GPT-4o-mini, o3-mini, etc",
-                    classes="provider-description"
-                )
-
-                yield RadioButton("GitHub Copilot", id="github_copilot")
-                yield Label(
-                    "GitHub Copilot models (requires subscription)",
-                    classes="provider-description"
-                )
+                    yield RadioButton(label, id=provider_id, value=(provider_id == "anthropic"))
+                    yield Label(provider.description, classes="provider-description")
 
                 yield RadioButton("Other / Configure Later", id="other")
                 yield Label(
@@ -283,55 +277,41 @@ class ProviderSelectionScreen(Screen):
             provider_id = event.pressed.id
             self._update_model_choices(provider_id)
 
-    def _update_model_choices(self, provider: str) -> None:
+    def _update_model_choices(self, provider_id: str | None) -> None:
         """Update model choices based on provider.
 
         Args:
-            provider: Provider ID (anthropic, openai, other)
+            provider_id: Provider ID (anthropic, openai, other)
         """
         model_set = self.query_one("#model-choice", RadioSet)
         model_set.remove_children()
 
-        if provider == "anthropic":
-            model_set.mount(
-                RadioButton("Claude Sonnet 4 (Best balance)", id="sonnet4", value=True)
-            )
-            model_set.mount(
-                RadioButton("Claude Opus 4 (Most capable)", id="opus4")
-            )
-            model_set.mount(
-                RadioButton("Claude Haiku 3.5 (Fastest)", id="haiku35")
-            )
-        elif provider == "openai":
-            model_set.mount(
-                RadioButton("GPT-4o (Recommended)", id="gpt4o", value=True)
-            )
-            model_set.mount(
-                RadioButton("GPT-4o-mini (Faster)", id="gpt4o-mini")
-            )
-            model_set.mount(
-                RadioButton("o3-mini (Reasoning)", id="o3-mini")
-            )
-        elif provider == "github_copilot":
-            model_set.mount(
-                RadioButton("GPT-5.2 (Latest, Recommended)", id="gh-gpt52", value=True)
-            )
-            model_set.mount(
-                RadioButton("GPT-5.2-Codex (Latest, Code-focused)", id="gh-gpt52-codex")
-            )
-            model_set.mount(
-                RadioButton("Claude Sonnet 4.5 (Balanced)", id="gh-sonnet45")
-            )
-            model_set.mount(
-                RadioButton("Claude Opus 4.5 (Most capable)", id="gh-opus45")
-            )
-            model_set.mount(
-                RadioButton("Gemini 2.5 Pro (Multimodal)", id="gh-gemini25")
-            )
-        else:
+        if not provider_id or provider_id == "other":
             # Other provider - will configure manually
             model_label = self.query_one("#model-label", Label)
             model_label.update("(Configure manually later)")
+            return
+
+        # Reset label
+        model_label = self.query_one("#model-label", Label)
+        model_label.update("Model:")
+
+        if provider_id in PROVIDERS:
+            provider = PROVIDERS[provider_id]
+            for model in provider.models:
+                if model.deprecated:
+                    continue
+
+                label = model.name
+                if model.recommended:
+                    label += " (Recommended)"
+                elif model.description:
+                    label += f" ({model.description})"
+
+                # Default to recommended model
+                is_default = model.recommended
+
+                model_set.mount(RadioButton(label, id=model.id, value=is_default))
 
     @on(Button.Pressed, "#next")
     def on_next(self) -> None:
@@ -344,26 +324,10 @@ class ProviderSelectionScreen(Screen):
 
             # Map model selection to full model name
             model_set = self.query_one("#model-choice", RadioSet)
-            if model_set.pressed_button:
+            if model_set.pressed_button and provider_id in PROVIDERS:
                 model_id = model_set.pressed_button.id
-
-                # Map to full model names
-                model_map = {
-                    "sonnet4": "anthropic/claude-sonnet-4-20250514",
-                    "opus4": "anthropic/claude-opus-4-20250514",
-                    "haiku35": "anthropic/claude-3-5-haiku-20241022",
-                    "gpt4o": "openai/gpt-4o",
-                    "gpt4o-mini": "openai/gpt-4o-mini",
-                    "o3-mini": "openai/o3-mini",
-                    # GitHub Copilot models
-                    "gh-gpt52": "github_copilot/gpt-5.2",
-                    "gh-gpt52-codex": "github_copilot/gpt-5.2-codex",
-                    "gh-sonnet45": "github_copilot/claude-sonnet-4.5",
-                    "gh-opus45": "github_copilot/claude-opus-4.5",
-                    "gh-gemini25": "github_copilot/gemini-2.5-pro",
-                }
-
-                self.state.model = model_map.get(model_id, self.state.model)
+                # Construct full model ID: provider/model
+                self.state.model = f"{provider_id}/{model_id}"
 
         # Move to API key screen
         self.app.push_screen(APIKeySetupScreen(self.state))
