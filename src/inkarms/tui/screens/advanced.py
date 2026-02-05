@@ -23,6 +23,7 @@ from textual.widgets import (
     RadioSet,
 )
 
+from inkarms.config.providers import PROVIDERS, get_default_model
 from inkarms.config.setup import create_directory_structure
 from inkarms.storage.paths import get_global_config_path
 
@@ -36,7 +37,7 @@ class AdvancedWizardState:
 
     # Section 1: Provider Configuration
     provider: str = "anthropic"
-    model: str = "anthropic/claude-sonnet-4-20250514"
+    model: str = get_default_model()
     api_key: str = ""
     fallback_provider: str = ""
     fallback_model: str = ""
@@ -263,9 +264,13 @@ class ProviderConfigurationScreen(Screen):
                 )
 
                 with RadioSet(id="provider-select"):
-                    yield RadioButton("Anthropic Claude (Recommended)", value="anthropic")
-                    yield RadioButton("OpenAI", value="openai")
-                    yield RadioButton("GitHub Copilot (OAuth)", value="github_copilot")
+                    # Dynamically populate providers
+                    for provider_id, provider in PROVIDERS.items():
+                        label = provider.name
+                        if "Recommended" in provider.description:
+                            label += " (Recommended)"
+                        yield RadioButton(label, value=provider_id)
+
                     yield RadioButton("Other", value="other")
 
             # Model Selection
@@ -331,26 +336,38 @@ class ProviderConfigurationScreen(Screen):
         """Mount event - set initial selections."""
         # Set provider radio button based on state
         provider_radio = self.query_one("#provider-select", RadioSet)
+        # Handle cases where current provider might be "other" or not in list
+        current_provider = self.state.provider
+        found = False
+
         for btn in provider_radio.query(RadioButton):
-            if btn.value == self.state.provider:
+            if btn.value == current_provider:
                 btn.value = True
+                found = True
                 break
+
+        if not found and current_provider not in PROVIDERS:
+            # Select "Other" if not found
+            for btn in provider_radio.query(RadioButton):
+                if btn.value == "other":
+                    btn.value = True
+                    break
 
     @on(RadioButton.Changed, "#provider-select RadioButton")
     def on_provider_changed(self, event: RadioButton.Changed) -> None:
         """Handle provider selection change."""
         if event.radio_button.value:
-            provider = event.radio_button.value
+            provider_id = str(event.radio_button.value)
 
             # Update model based on provider
             model_input = self.query_one("#model-input", Input)
 
-            if provider == "anthropic":
-                model_input.value = "anthropic/claude-sonnet-4-20250514"
-            elif provider == "openai":
-                model_input.value = "openai/gpt-4o"
-            elif provider == "github_copilot":
-                model_input.value = "github_copilot/gpt-5.2"
+            if provider_id in PROVIDERS:
+                provider = PROVIDERS[provider_id]
+                if provider.default_model:
+                    model_input.value = f"{provider_id}/{provider.default_model}"
+                elif provider.models:
+                    model_input.value = f"{provider_id}/{provider.models[0].id}"
             else:
                 model_input.value = ""
 
@@ -364,6 +381,10 @@ class ProviderConfigurationScreen(Screen):
     def on_next_button(self) -> None:
         """Handle next button press."""
         # Save current values to state
+        provider_radio = self.query_one("#provider-select", RadioSet)
+        if provider_radio.pressed_button:
+            self.state.provider = str(provider_radio.pressed_button.value)
+
         model_input = self.query_one("#model-input", Input)
         fallback_provider_input = self.query_one("#fallback-provider-input", Input)
         fallback_model_input = self.query_one("#fallback-model-input", Input)

@@ -10,13 +10,24 @@ import typer
 from rich.console import Console
 
 from inkarms import __version__
-from inkarms.cli.commands import audit, config, memory, platforms, profile, run, skill, status, tools
+from inkarms.cli.commands import (
+    audit,
+    config,
+    memory,
+    platforms,
+    profile,
+    run,
+    skill,
+    status,
+    tools,
+)
 
 # Create the main Typer app
 app = typer.Typer(
     name="inkarms",
     help="Your local AI Agent with multi-provider support, skills, and TUI.",
-    no_args_is_help=True,
+    no_args_is_help=False,  # Allow running without args to launch UI
+    invoke_without_command=True,  # Allow callback to run when no subcommand
     rich_markup_mode="rich",
     pretty_exceptions_enable=True,
     pretty_exceptions_show_locals=False,
@@ -26,6 +37,43 @@ app = typer.Typer(
 console = Console()
 
 
+def _launch_ui(backend: str | None = None) -> None:
+    """Launch the unified UI interface."""
+    try:
+        from inkarms.ui import get_ui_backend
+        from inkarms.ui.protocol import UIConfig
+
+        # Get config from app config if available
+        ui_config = UIConfig()
+        try:
+            from inkarms.config import get_config
+            app_config = get_config()
+            ui_config = UIConfig(
+                theme=app_config.ui.theme,
+                show_status_bar=app_config.ui.show_status_bar,
+                show_timestamps=app_config.ui.show_timestamps,
+                max_messages_display=app_config.ui.max_messages_display,
+                enable_mouse=app_config.ui.enable_mouse,
+                enable_completion=app_config.ui.enable_completion,
+            )
+            if backend is None:
+                backend = app_config.ui.backend
+        except Exception:
+            pass  # Use defaults if config not available
+
+        # Get and run the UI backend
+        backend_type = backend or "auto"
+        ui = get_ui_backend(backend_type=backend_type, config=ui_config)  # type: ignore
+        ui.run()
+
+    except ImportError as e:
+        console.print(f"[red]Error:[/red] Failed to load UI: {e}")
+        console.print("[yellow]Try installing with:[/yellow] pip install inkarms[textual]")
+        raise typer.Exit(1)
+    except KeyboardInterrupt:
+        pass  # Clean exit on Ctrl+C
+
+
 def version_callback(value: bool) -> None:
     """Print version and exit."""
     if value:
@@ -33,8 +81,9 @@ def version_callback(value: bool) -> None:
         raise typer.Exit()
 
 
-@app.callback()
+@app.callback(invoke_without_command=True)
 def main_callback(
+    ctx: typer.Context,
     version: Annotated[
         bool | None,
         typer.Option(
@@ -76,6 +125,13 @@ def main_callback(
             help="Disable colored output.",
         ),
     ] = False,
+    ui_backend: Annotated[
+        str | None,
+        typer.Option(
+            "--ui",
+            help="UI backend: auto, rich, or textual.",
+        ),
+    ] = None,
 ) -> None:
     """
     [bold blue]inkarms[/bold blue] - AI Agent CLI Tool
@@ -83,11 +139,12 @@ def main_callback(
     A powerful AI agent with multi-provider support, skills system,
     TUI interface, and secure execution sandbox.
 
+    Run [bold]inkarms[/bold] without arguments to launch the interactive UI.
     Use [bold]inkarms --help[/bold] to see all commands.
     """
-    # Store global options in context for subcommands
-    # This will be implemented when we add the config system
-    pass
+    # If no subcommand is invoked, launch the UI
+    if ctx.invoked_subcommand is None:
+        _launch_ui(ui_backend)
 
 
 # Register command groups
@@ -103,29 +160,18 @@ app.add_typer(platforms.app, name="platforms")
 
 
 @app.command()
-def chat(
-    session_id: Annotated[
-        str,
+def ui(
+    backend: Annotated[
+        str | None,
         typer.Option(
-            "--session",
-            "-s",
-            help="Session ID for conversation tracking.",
+            "--backend",
+            "-b",
+            help="UI backend: auto, rich, or textual.",
         ),
-    ] = "default",
+    ] = None,
 ) -> None:
-    """Launch the interactive chat interface (TUI)."""
-    from inkarms.tui.app import run_chat_interface
-
-    run_chat_interface(session_id=session_id)
-
-
-@app.command()
-def interactive() -> None:
-    """Start an interactive CLI session (REPL mode)."""
-    console.print(
-        "[yellow]Interactive mode not yet implemented. Coming in Phase 1.[/yellow]"
-    )
-    raise typer.Exit(1)
+    """Launch the interactive UI (menu, chat, dashboard, sessions)."""
+    _launch_ui(backend)
 
 
 def main() -> None:

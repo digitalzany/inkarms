@@ -8,39 +8,8 @@ from typing import Any
 
 import tiktoken
 
+from inkarms.config.providers import ENCODING_MAP, MODEL_CONTEXT_WINDOWS
 from inkarms.memory.models import ContextUsage, ConversationTurn, Session, TurnRole
-
-
-# Model context window sizes (conservative estimates)
-MODEL_CONTEXT_WINDOWS = {
-    # Anthropic
-    "anthropic/claude-opus-4-20250514": 200000,
-    "anthropic/claude-sonnet-4-20250514": 200000,
-    "anthropic/claude-3-5-sonnet-20241022": 200000,
-    "anthropic/claude-3-opus-20240229": 200000,
-    "anthropic/claude-3-sonnet-20240229": 200000,
-    "anthropic/claude-3-haiku-20240307": 200000,
-    # OpenAI
-    "openai/gpt-4o": 128000,
-    "openai/gpt-4o-mini": 128000,
-    "openai/gpt-4-turbo": 128000,
-    "openai/gpt-4": 8192,
-    "openai/gpt-3.5-turbo": 16385,
-    # Google
-    "google/gemini-pro": 32000,
-    "google/gemini-1.5-pro": 1000000,
-    "google/gemini-1.5-flash": 1000000,
-    # Default
-    "default": 128000,
-}
-
-# Encodings for different model families
-ENCODING_MAP = {
-    "anthropic": "cl100k_base",
-    "openai": "cl100k_base",
-    "google": "cl100k_base",  # Approximation
-    "default": "cl100k_base",
-}
 
 
 class TokenCounter:
