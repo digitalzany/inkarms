@@ -117,7 +117,7 @@ def _render_markdown_to_tuples(text: str, width: int = 100) -> list:
     return list(to_formatted_text(ANSI(ansi_output)))
 
 
-def _render_markdown_ansi(text: str, width: int = 100) -> str:
+def _render_markdown_ansi(text: str, width: int = 100, style: str = "") -> str:
     """Render markdown to ANSI-formatted string using Rich."""
     console = Console(
         file=io.StringIO(),
@@ -126,7 +126,7 @@ def _render_markdown_ansi(text: str, width: int = 100) -> str:
         color_system="256",
         highlight=False,
     )
-    md = Markdown(text, code_theme="monokai")
+    md = Markdown(text, code_theme="monokai", style=style)
     console.print(md)
     return console.file.getvalue().rstrip()
 
@@ -1132,7 +1132,9 @@ class _ChatView:
                         )
                         # Render markdown to plain text with ANSI via Rich
                         try:
-                            rendered = _render_markdown_ansi(msg.content)
+                            rendered = _render_markdown_ansi(
+                                msg.content, style=THEME_STYLES.get("assistant-text", "")
+                            )
                             lines.append(rendered)
                         except Exception:
                             lines.append(msg.content)
@@ -1142,7 +1144,10 @@ class _ChatView:
                 lines.append(_render_styled_text("Assistant:", THEME_STYLES["assistant"]))
                 if self.streaming_content:
                     try:
-                        rendered = _render_markdown_ansi(self.streaming_content)
+                        rendered = _render_markdown_ansi(
+                            self.streaming_content,
+                            style=THEME_STYLES.get("assistant-text", ""),
+                        )
                         lines.append(rendered + "▌")
                     except Exception:
                         lines.append(self.streaming_content + "▌")
