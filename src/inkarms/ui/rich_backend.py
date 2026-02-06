@@ -5,6 +5,7 @@ This is the default, lightweight UI backend using Rich for formatting
 and prompt_toolkit for full-screen applications and input handling.
 """
 
+import traceback
 import asyncio
 import concurrent.futures
 import io
@@ -18,7 +19,7 @@ from prompt_toolkit import Application
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.formatted_text import ANSI, HTML
+from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import (
     BufferControl,
@@ -28,69 +29,18 @@ from prompt_toolkit.layout import (
     HSplit,
     Layout,
     Window,
-    WindowAlign,
 )
 from prompt_toolkit.layout.margins import ScrollbarMargin
-from prompt_toolkit.layout.dimension import Dimension
 from prompt_toolkit.layout.menus import CompletionsMenu
-from prompt_toolkit.output import ColorDepth
-from prompt_toolkit.styles import Style
 from prompt_toolkit.widgets import TextArea
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.text import Text
 
+from inkarms.config.theme import LOGO, STYLE, THEME_STYLES
 from inkarms.ui.protocol import ChatMessage, SessionInfo, StatusInfo, UIBackend, UIConfig, UIView
 
 logger = logging.getLogger(__name__)
-
-
-# =============================================================================
-# Styles
-# =============================================================================
-
-STYLE = Style.from_dict({
-    # Branding
-    'brand': 'bold #00d4ff',
-    'tagline': 'italic #666666',
-    # Status bar
-    'status-bar': 'bg:#1a1a2e #666666',
-    'status-provider': 'bg:#1a1a2e #00d4ff',
-    'status-model': 'bg:#1a1a2e #ffffff',
-    'status-session': 'bg:#1a1a2e #00ff88',
-    'status-tokens': 'bg:#1a1a2e #888888',
-    'status-cost': 'bg:#1a1a2e #ffaa00',
-    # Menu
-    'title': 'bold #00d4ff',
-    'subtitle': '#888888',
-    'menu-item': '#777777',
-    'menu-selected': 'bold #00d4ff',
-    'menu-desc': '#555555',
-    # Chat
-    'header': 'bold #00d4ff',
-    'user': 'bold #00d4ff',
-    'assistant': '#00ff88',
-    # General
-    'info': '#888888',
-    'success': '#00ff88',
-    'warning': '#ffaa00',
-    'error': '#ff6b6b',
-    'prompt': 'bold #e94560',
-    'hint': '#555555',
-    'hint-dim': '#3a3a3a',
-    'frame': '#333333',
-    # Completion menu
-    'completion-menu': 'bg:#1a1a2e #ffffff',
-    'completion-menu.completion': 'bg:#1a1a2e #ffffff',
-    'completion-menu.completion.current': 'bg:#0f3460 #00d4ff bold',
-    'completion-menu.meta.completion': 'bg:#1a1a2e #666666',
-    'completion-menu.meta.completion.current': 'bg:#0f3460 #888888',
-})
-
-LOGO = """
-     █ █▄ █ █▄▀ ▄▀█ █▀█ █▀▄▀█ █▀
-     █ █ ▀█ █ █ █▀█ █▀▄ █ ▀ █ ▄█
-"""
 
 
 # =============================================================================
@@ -102,20 +52,20 @@ class CommandCompleter(Completer):
     """Completer for slash commands with fuzzy matching."""
 
     COMMANDS = [
-        ('/help', 'Show available commands'),
-        ('/menu', 'Return to main menu'),
-        ('/dashboard', 'Show dashboard'),
-        ('/sessions', 'Manage sessions'),
-        ('/config', 'Open configuration'),
-        ('/clear', 'Clear current session'),
-        ('/usage', 'Show token usage'),
-        ('/status', 'Show current status'),
-        ('/model', 'Show/change model'),
-        ('/quit', 'Exit InkArms'),
-        ('/save', 'Save session'),
-        ('/load', 'Load session'),
-        ('/history', 'Show message history'),
-        ('/chat', 'Go to chat'),
+        ("/help", "Show available commands"),
+        ("/menu", "Return to main menu"),
+        ("/dashboard", "Show dashboard"),
+        ("/sessions", "Manage sessions"),
+        ("/config", "Open configuration"),
+        ("/clear", "Clear current session"),
+        ("/usage", "Show token usage"),
+        ("/status", "Show current status"),
+        ("/model", "Show/change model"),
+        ("/quit", "Exit InkArms"),
+        ("/save", "Save session"),
+        ("/load", "Load session"),
+        ("/history", "Show message history"),
+        ("/chat", "Go to chat"),
     ]
 
     def _fuzzy_match(self, text: str, cmd: str) -> bool:
@@ -179,6 +129,17 @@ def _render_markdown_ansi(text: str, width: int = 100) -> str:
     md = Markdown(text, code_theme="monokai")
     console.print(md)
     return console.file.getvalue().rstrip()
+
+
+def _render_styled_text(text: str, style_str: str) -> str:
+    """Render text with a specific style to ANSI string."""
+    console = Console(
+        file=io.StringIO(),
+        force_terminal=True,
+        color_system="256",
+    )
+    console.print(Text(text, style=style_str), end="")
+    return console.file.getvalue()
 
 
 class AnsiLexer:
@@ -390,11 +351,13 @@ class RichBackend(UIBackend):
 
     def display_streaming_end(self) -> None:
         if self._streaming_content:
-            self._messages.append(ChatMessage(
-                role="assistant",
-                content=self._streaming_content,
-                timestamp=datetime.now().strftime("%H:%M"),
-            ))
+            self._messages.append(
+                ChatMessage(
+                    role="assistant",
+                    content=self._streaming_content,
+                    timestamp=datetime.now().strftime("%H:%M"),
+                )
+            )
             self._streaming_content = ""
 
     def display_error(self, message: str) -> None:
@@ -484,18 +447,18 @@ class RichBackend(UIBackend):
     def _get_status_bar(self):
         """Get status bar formatted text."""
         return [
-            ('class:status-bar', ' '),
-            ('class:status-provider', f'{self._status.provider or "not configured"}'),
-            ('class:status-bar', ' / '),
-            ('class:status-model', f'{self._status.model or "—"}'),
-            ('class:status-bar', ' │ '),
-            ('class:status-session', f'{self._status.session or "no session"}'),
-            ('class:status-bar', f' ({self._status.message_count})'),
-            ('class:status-bar', ' │ '),
-            ('class:status-tokens', f'{self._status.total_tokens:,} tok'),
-            ('class:status-bar', ' │ '),
-            ('class:status-cost', f'${self._status.total_cost:.2f}'),
-            ('class:status-bar', ' '),
+            ("class:status-bar", " "),
+            ("class:status-provider", f"{self._status.provider or 'not configured'}"),
+            ("class:status-bar", " / "),
+            ("class:status-model", f"{self._status.model or '—'}"),
+            ("class:status-bar", " │ "),
+            ("class:status-session", f"{self._status.session or 'no session'}"),
+            ("class:status-bar", f" ({self._status.message_count})"),
+            ("class:status-bar", " │ "),
+            ("class:status-tokens", f"{self._status.total_tokens:,} tok"),
+            ("class:status-bar", " │ "),
+            ("class:status-cost", f"${self._status.total_cost:.2f}"),
+            ("class:status-bar", " "),
         ]
 
     def _run_sessions_menu(self) -> str:
@@ -516,9 +479,7 @@ class RichBackend(UIBackend):
 
         if choice == "new":
             name = self.get_text_input(
-                "New Session",
-                "Name: ",
-                default=f"chat-{datetime.now().strftime('%H%M')}"
+                "New Session", "Name: ", default=f"chat-{datetime.now().strftime('%H%M')}"
             )
             if name:
                 self.create_session(name)
@@ -540,22 +501,22 @@ class RichBackend(UIBackend):
         # Build system prompt from config and skills
         system_parts = []
 
-        # Add personality from config
-        if self._app_config and self._app_config.system_prompt.personality:
-            system_parts.append(self._app_config.system_prompt.personality)
-
-        # Add skill prompts
-        if self._skill_manager:
-            try:
-                skills = self._skill_manager.get_skills_for_query(query, max_skills=3)
-                if skills:
-                    skill_parts = ["# Active Skills\n"]
-                    for skill in skills:
-                        skill_parts.append(skill.get_system_prompt_injection())
-                        skill_parts.append("\n---\n")
-                    system_parts.append("\n".join(skill_parts))
-            except Exception as e:
-                logger.debug(f"Skill loading error: {e}")
+        # # Add personality from config
+        # if self._app_config and self._app_config.system_prompt.personality:
+        #     system_parts.append(self._app_config.system_prompt.personality)
+        #
+        # # Add skill prompts
+        # if self._skill_manager:
+        #     try:
+        #         skills = self._skill_manager.get_skills_for_query(query, max_skills=3)
+        #         if skills:
+        #             skill_parts = ["# Active Skills\n"]
+        #             for skill in skills:
+        #                 skill_parts.append(skill.get_system_prompt_injection())
+        #                 skill_parts.append("\n---\n")
+        #             system_parts.append("\n".join(skill_parts))
+        #     except Exception as e:
+        #         logger.debug(f"Skill loading error: {e}")
 
         # Add system message if we have content
         if system_parts:
@@ -601,6 +562,7 @@ class RichBackend(UIBackend):
                         on_chunk(chunk.content)
                     return full_content
                 except Exception as e:
+                    traceback.print_exc()
                     raise e
 
             try:
@@ -669,7 +631,7 @@ class RichBackend(UIBackend):
 
     def _expand_file_references(self, text: str) -> str:
         """Expand @path references to file contents."""
-        pattern = r'@([^\s]+)'
+        pattern = r"@([^\s]+)"
 
         def replace(m):
             path = Path(m.group(1)).expanduser()
@@ -688,6 +650,7 @@ class RichBackend(UIBackend):
 # Internal View Components
 # =============================================================================
 
+
 class _Menu:
     """Simple menu component."""
 
@@ -701,60 +664,66 @@ class _Menu:
 
     def get_formatted_text(self):
         result = []
-        result.append(('class:title', f'\n  {self.title}\n'))
+        result.append(("class:title", f"\n  {self.title}\n"))
         if self.subtitle:
-            result.append(('class:subtitle', f'  {self.subtitle}\n'))
-        result.append(('', '\n'))
+            result.append(("class:subtitle", f"  {self.subtitle}\n"))
+        result.append(("", "\n"))
 
         for i, (value, label, desc) in enumerate(self.items):
             if i == self.selected:
-                result.append(('class:menu-selected', f'    ❯ {label}\n'))
+                result.append(("class:menu-selected", f"    ❯ {label}\n"))
                 if desc:
-                    result.append(('class:menu-desc', f'      {desc}\n'))
+                    result.append(("class:menu-desc", f"      {desc}\n"))
             else:
-                result.append(('class:menu-item', f'      {label}\n'))
+                result.append(("class:menu-item", f"      {label}\n"))
 
-        result.append(('', '\n'))
-        result.append(('class:hint', '  ↑↓ navigate  Enter select  Esc cancel\n'))
+        result.append(("", "\n"))
+        result.append(("class:hint", "  ↑↓ navigate  Enter select  Esc cancel\n"))
         return result
 
     def run(self) -> str | None:
         kb = KeyBindings()
 
-        @kb.add('up')
-        def up(event): self.selected = (self.selected - 1) % len(self.items)
+        @kb.add("up")
+        def up(event):
+            self.selected = (self.selected - 1) % len(self.items)
 
-        @kb.add('down')
-        def down(event): self.selected = (self.selected + 1) % len(self.items)
+        @kb.add("down")
+        def down(event):
+            self.selected = (self.selected + 1) % len(self.items)
 
-        @kb.add('k')
-        def up_k(event): self.selected = (self.selected - 1) % len(self.items)
+        @kb.add("k")
+        def up_k(event):
+            self.selected = (self.selected - 1) % len(self.items)
 
-        @kb.add('j')
-        def down_j(event): self.selected = (self.selected + 1) % len(self.items)
+        @kb.add("j")
+        def down_j(event):
+            self.selected = (self.selected + 1) % len(self.items)
 
-        @kb.add('enter')
+        @kb.add("enter")
         def select(event):
             self.result = self.items[self.selected][0]
             event.app.exit()
 
-        @kb.add('escape')
+        @kb.add("escape")
         def cancel(event):
             self.cancelled = True
             event.app.exit()
 
-        @kb.add('q')
+        @kb.add("q")
         def quit(event):
             self.cancelled = True
             event.app.exit()
 
-        @kb.add('c-c')
+        @kb.add("c-c")
         def ctrl_c(event):
             self.cancelled = True
             event.app.exit()
 
         layout = Layout(Window(FormattedTextControl(self.get_formatted_text)))
-        app = Application(layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True)
+        app = Application(
+            layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True
+        )
         app.run()
         return None if self.cancelled else self.result
 
@@ -772,12 +741,12 @@ class _TextInput:
     def run(self) -> str | None:
         kb = KeyBindings()
 
-        @kb.add('escape')
+        @kb.add("escape")
         def cancel(event):
             self.cancelled = True
             event.app.exit()
 
-        @kb.add('c-c')
+        @kb.add("c-c")
         def ctrl_c(event):
             self.cancelled = True
             event.app.exit()
@@ -791,19 +760,28 @@ class _TextInput:
 
         def get_title():
             return [
-                ('class:title', f'\n  {self.title}\n\n'),
-                ('class:hint', '  Enter to confirm, Esc to cancel\n\n'),
+                ("class:title", f"\n  {self.title}\n\n"),
+                ("class:hint", "  Enter to confirm, Esc to cancel\n\n"),
             ]
 
-        layout = Layout(HSplit([
-            Window(FormattedTextControl(get_title), height=5),
-            Window(FormattedTextControl(lambda: [('class:prompt', f'  {self.prompt_text}')]),
-                   height=1, width=len(self.prompt_text) + 2),
-            text_area,
-        ]))
+        layout = Layout(
+            HSplit(
+                [
+                    Window(FormattedTextControl(get_title), height=5),
+                    Window(
+                        FormattedTextControl(lambda: [("class:prompt", f"  {self.prompt_text}")]),
+                        height=1,
+                        width=len(self.prompt_text) + 2,
+                    ),
+                    text_area,
+                ]
+            )
+        )
         layout.focus(text_area)
 
-        app = Application(layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True)
+        app = Application(
+            layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True
+        )
         app.run()
 
         return None if self.cancelled else text_area.text
@@ -812,7 +790,7 @@ class _TextInput:
 class _MainMenu:
     """Main menu with branding."""
 
-    def __init__(self, backend: 'RichBackend'):
+    def __init__(self, backend: "RichBackend"):
         self.backend = backend
         self.selected = 0
         self.items = [
@@ -820,92 +798,98 @@ class _MainMenu:
             ("dashboard", "Dashboard", "View usage and stats"),
             ("sessions", "Sessions", "Manage chat sessions"),
             ("config", "Config", "Configure provider and model"),
-            ("quit", "Quit", "Exit InkArms"),
+            ("quit", "Quit", ""),
         ]
         self.result = None
 
     def get_formatted_text(self):
         result = []
 
-        for line in LOGO.strip().split('\n'):
-            result.append(('class:brand', f'{line}\n'))
+        for line in LOGO.strip().split("\n"):
+            result.append(("class:brand", f"{line}\n"))
 
-        result.append(('class:tagline', '    Your AI assistant that does things\n'))
-        result.append(('', '\n'))
+        result.append(("class:tagline", "    Your AI assistant that does things\n"))
+        result.append(("", "\n"))
         result.extend(self.backend._get_status_bar())
-        result.append(('', '\n\n'))
+        result.append(("", "\n\n"))
 
         for i, (value, label, desc) in enumerate(self.items):
             if i == self.selected:
-                result.append(('class:menu-selected', f'    ❯ {label}\n'))
-                result.append(('class:menu-desc', f'      {desc}\n'))
+                result.append(("class:menu-selected", f"    ❯ {label}"))
+                result.append(("class:menu-desc", f"      {desc}\n"))
             else:
-                result.append(('class:menu-item', f'      {label}\n'))
+                result.append(("class:menu-item", f"      {label}\n"))
 
-        result.append(('', '\n'))
-        result.append(('class:hint', '    ↑↓'))
-        result.append(('class:hint-dim', ' navigate  '))
-        result.append(('class:hint', 'Enter'))
-        result.append(('class:hint-dim', ' select  '))
-        result.append(('class:hint', 'q'))
-        result.append(('class:hint-dim', ' quit  '))
-        result.append(('class:hint', 'c'))
-        result.append(('class:hint-dim', ' chat  '))
-        result.append(('class:hint', 'd'))
-        result.append(('class:hint-dim', ' dashboard  '))
-        result.append(('class:hint', 's'))
-        result.append(('class:hint-dim', ' sessions\n'))
+        result.append(("", "\n"))
+        result.append(("class:hint", "    ↑↓"))
+        result.append(("class:hint-dim", " navigate  "))
+        result.append(("class:hint", "Enter"))
+        result.append(("class:hint-dim", " select  "))
+        result.append(("class:hint", "q"))
+        result.append(("class:hint-dim", " quit  "))
+        result.append(("class:hint", "c"))
+        result.append(("class:hint-dim", " chat  "))
+        result.append(("class:hint", "d"))
+        result.append(("class:hint-dim", " dashboard  "))
+        result.append(("class:hint", "s"))
+        result.append(("class:hint-dim", " sessions\n"))
 
         return result
 
     def run(self) -> str:
         kb = KeyBindings()
 
-        @kb.add('up')
-        def up(event): self.selected = (self.selected - 1) % len(self.items)
+        @kb.add("up")
+        def up(event):
+            self.selected = (self.selected - 1) % len(self.items)
 
-        @kb.add('down')
-        def down(event): self.selected = (self.selected + 1) % len(self.items)
+        @kb.add("down")
+        def down(event):
+            self.selected = (self.selected + 1) % len(self.items)
 
-        @kb.add('k')
-        def up_k(event): self.selected = (self.selected - 1) % len(self.items)
+        @kb.add("k")
+        def up_k(event):
+            self.selected = (self.selected - 1) % len(self.items)
 
-        @kb.add('j')
-        def down_j(event): self.selected = (self.selected + 1) % len(self.items)
+        @kb.add("j")
+        def down_j(event):
+            self.selected = (self.selected + 1) % len(self.items)
 
-        @kb.add('enter')
+        @kb.add("enter")
         def select(event):
             self.result = self.items[self.selected][0]
             event.app.exit()
 
-        @kb.add('escape')
-        @kb.add('q')
+        @kb.add("escape")
+        @kb.add("q")
         def quit(event):
             self.result = "quit"
             event.app.exit()
 
-        @kb.add('c-c')
+        @kb.add("c-c")
         def ctrl_c(event):
             self.result = "quit"
             event.app.exit()
 
-        @kb.add('c')
+        @kb.add("c")
         def chat(event):
             self.result = "chat"
             event.app.exit()
 
-        @kb.add('d')
+        @kb.add("d")
         def dashboard(event):
             self.result = "dashboard"
             event.app.exit()
 
-        @kb.add('s')
+        @kb.add("s")
         def sessions(event):
             self.result = "sessions"
             event.app.exit()
 
         layout = Layout(Window(FormattedTextControl(self.get_formatted_text)))
-        app = Application(layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True)
+        app = Application(
+            layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True
+        )
         app.run()
         return self.result or "quit"
 
@@ -913,7 +897,7 @@ class _MainMenu:
 class _ChatView:
     """Chat view component - uses pattern from working demo."""
 
-    def __init__(self, backend: 'RichBackend'):
+    def __init__(self, backend: "RichBackend"):
         self.backend = backend
         self.exit_to: UIView | None = UIView.MENU
         self.pending_message: str | None = None
@@ -929,34 +913,34 @@ class _ChatView:
         messages = self.backend._messages
 
         if not messages and not self.streaming:
-            lines.append(('class:info', '  Start typing to chat...\n'))
-            lines.append(('class:hint', '  Type /help for commands\n'))
+            lines.append(("class:info", "  Start typing to chat...\n"))
+            lines.append(("class:hint", "  Type /help for commands\n"))
             return lines
 
         for msg in messages:
             ts = msg.timestamp if self.backend.config.show_timestamps else ""
             if msg.role == "user":
                 if ts:
-                    lines.append(('class:info', f'[{ts}] '))
-                lines.append(('class:user', 'You: '))
-                lines.append(('', f'{msg.content}\n\n'))
+                    lines.append(("class:info", f"[{ts}] "))
+                lines.append(("class:user", "You: "))
+                lines.append(("", f"{msg.content}\n\n"))
             else:
                 if ts:
-                    lines.append(('class:info', f'[{ts}] '))
-                lines.append(('class:assistant', 'Assistant: '))
+                    lines.append(("class:info", f"[{ts}] "))
+                lines.append(("class:assistant", "Assistant: "))
                 # Plain text - prompt_toolkit doesn't support ANSI from Rich
-                lines.append(('', f'{msg.content}\n\n'))
+                lines.append(("", f"{msg.content}\n\n"))
 
         # Show streaming content
         if self.streaming:
-            lines.append(('class:assistant', 'Assistant: '))
+            lines.append(("class:assistant", "Assistant: "))
             if self.streaming_content:
-                lines.append(('', f'{self.streaming_content}▌\n'))
+                lines.append(("", f"{self.streaming_content}▌\n"))
             else:
-                lines.append(('class:info', 'thinking...▌\n'))
+                lines.append(("class:info", "thinking...▌\n"))
 
         if self.pending_message:
-            lines.append(('class:warning', f'\n  {self.pending_message}\n'))
+            lines.append(("class:warning", f"\n  {self.pending_message}\n"))
 
         return lines
 
@@ -964,19 +948,19 @@ class _ChatView:
         """Status bar text."""
         s = self.backend._status
         if self.streaming:
-            return [('class:info', ' Streaming response... | Ctrl+C to cancel ')]
+            return [("class:info", " Streaming response... | Ctrl+C to cancel ")]
         return [
-            ('class:status-bar', ' '),
-            ('class:status-provider', f'{s.provider or "—"}'),
-            ('class:status-bar', ' | '),
-            ('class:status-model', f'{s.model or "—"}'),
-            ('class:status-bar', ' | '),
-            ('class:status-session', f'{s.session or "—"}'),
-            ('class:status-bar', f' ({s.message_count}) | '),
-            ('class:status-tokens', f'{s.total_tokens:,} tok'),
-            ('class:status-bar', ' | '),
-            ('class:status-cost', f'${s.total_cost:.2f}'),
-            ('class:status-bar', ' '),
+            ("class:status-bar", " "),
+            ("class:status-provider", f"{s.provider or '—'}"),
+            ("class:status-bar", " | "),
+            ("class:status-model", f"{s.model or '—'}"),
+            ("class:status-bar", " | "),
+            ("class:status-session", f"{s.session or '—'}"),
+            ("class:status-bar", f" ({s.message_count}) | "),
+            ("class:status-tokens", f"{s.total_tokens:,} tok"),
+            ("class:status-bar", " | "),
+            ("class:status-cost", f"${s.total_cost:.2f}"),
+            ("class:status-bar", " "),
         ]
 
     def _handle_command(self, text: str):
@@ -1009,7 +993,9 @@ class _ChatView:
         elif cmd == "/usage":
             self.pending_message = f"Tokens: {self.backend._status.total_tokens:,} | Cost: ${self.backend._status.total_cost:.4f}"
         elif cmd == "/status":
-            self.pending_message = f"Provider: {self.backend._status.provider} | Model: {self.backend._status.model}"
+            self.pending_message = (
+                f"Provider: {self.backend._status.provider} | Model: {self.backend._status.model}"
+            )
         else:
             self.pending_message = f"Unknown command: {cmd}. Type /help for available commands."
 
@@ -1028,17 +1014,18 @@ class _ChatView:
             completer=COMMAND_COMPLETER,
             complete_while_typing=True,
             accept_handler=lambda buff: self._on_accept(buff),
+            style="class:user-input",
         )
 
         kb = KeyBindings()
 
-        @kb.add('c-c')
-        @kb.add('c-q')
+        @kb.add("c-c")
+        @kb.add("c-q")
         def exit_(event):
             self.exit_to = UIView.MENU
             event.app.exit()
 
-        @kb.add('escape')
+        @kb.add("escape")
         def escape_(event):
             self.exit_to = UIView.MENU
             event.app.exit()
@@ -1066,46 +1053,51 @@ class _ChatView:
                     self.chat_buffer.cursor_position += new_pos
                     doc = self.chat_buffer.document
 
-        @kb.add('pageup')
+        @kb.add("pageup")
         def page_up(event):
             scroll_chat_up(10)
 
-        @kb.add('pagedown')
+        @kb.add("pagedown")
         def page_down(event):
             scroll_chat_down(10)
 
-        @kb.add('c-u')
+        @kb.add("c-u")
         def scroll_up_half(event):
             scroll_chat_up(20)
 
-        @kb.add('c-d')
+        @kb.add("c-d")
         def scroll_down_half(event):
             scroll_chat_down(20)
 
-        @kb.add('home')
+        @kb.add("home")
         def scroll_top(event):
             if self.chat_buffer:
                 self.chat_buffer.cursor_position = 0
 
-        @kb.add('end')
+        @kb.add("end")
         def scroll_bottom(event):
             if self.chat_buffer:
                 self.chat_buffer.cursor_position = len(self.chat_buffer.text)
 
         # Mouse scroll support - move cursor to scroll the view
-        @kb.add('<scroll-up>')
+        @kb.add("<scroll-up>")
         def mouse_scroll_up(event):
             scroll_chat_up(3)
 
-        @kb.add('<scroll-down>')
+        @kb.add("<scroll-down>")
         def mouse_scroll_down(event):
             scroll_chat_down(3)
 
         # Layout
         header = Window(
-            content=FormattedTextControl(lambda: [
-                ('class:header', ' InkArms Chat | /help | PgUp/PgDn or mouse scroll | Ctrl+C menu ')
-            ]),
+            content=FormattedTextControl(
+                lambda: [
+                    (
+                        "class:header",
+                        " InkArms Chat | /help | PgUp/PgDn or mouse scroll | Ctrl+C menu ",
+                    )
+                ]
+            ),
             height=1,
         )
 
@@ -1120,8 +1112,8 @@ class _ChatView:
             messages = self.backend._messages
 
             if not messages and not self.streaming:
-                lines.append('  Start typing to chat...')
-                lines.append('  Type /help for commands')
+                lines.append("  Start typing to chat...")
+                lines.append("  Type /help for commands")
             else:
                 for msg in messages:
                     ts = (
@@ -1130,10 +1122,14 @@ class _ChatView:
                         else ""
                     )
                     if msg.role == "user":
-                        lines.append(f"{ts}You: {msg.content}")
+                        lines.append(
+                            _render_styled_text(f"{ts}You: {msg.content}", THEME_STYLES["user"])
+                        )
                         lines.append("")
                     else:
-                        lines.append(f"{ts}Assistant:")
+                        lines.append(
+                            _render_styled_text(f"{ts}Assistant:", THEME_STYLES["assistant"])
+                        )
                         # Render markdown to plain text with ANSI via Rich
                         try:
                             rendered = _render_markdown_ansi(msg.content)
@@ -1143,7 +1139,7 @@ class _ChatView:
                         lines.append("")
 
             if self.streaming:
-                lines.append(('class:assistant', 'Assistant:\n'))
+                lines.append(_render_styled_text("Assistant:", THEME_STYLES["assistant"]))
                 if self.streaming_content:
                     try:
                         rendered = _render_markdown_ansi(self.streaming_content)
@@ -1185,20 +1181,29 @@ class _ChatView:
         )
 
         # Use FloatContainer for completion menu
-        body = HSplit([
-            header,
-            Frame(chat_window, title="Chat"),
-            Frame(input_area, title="You (Enter to send, Tab for completions)"),
-            status_bar,
-        ])
+        body = HSplit(
+            [
+                header,
+                Frame(chat_window, title="Chat"),
+                Frame(input_area, title="You (Enter to send, Tab for completions)"),
+                status_bar,
+            ]
+        )
 
         from prompt_toolkit.layout.menus import CompletionsMenu
 
-        layout = Layout(FloatContainer(
-            content=body,
-            floats=[Float(xcursor=True, ycursor=True,
-                         content=CompletionsMenu(max_height=8, scroll_offset=1))],
-        ))
+        layout = Layout(
+            FloatContainer(
+                content=body,
+                floats=[
+                    Float(
+                        xcursor=True,
+                        ycursor=True,
+                        content=CompletionsMenu(max_height=8, scroll_offset=1),
+                    )
+                ],
+            )
+        )
         layout.focus(input_area)
 
         self.app = Application(
@@ -1261,7 +1266,7 @@ class _ChatView:
 class _DashboardView:
     """Dashboard view component."""
 
-    def __init__(self, backend: 'RichBackend'):
+    def __init__(self, backend: "RichBackend"):
         self.backend = backend
         self.exit_to = UIView.MENU
 
@@ -1271,38 +1276,46 @@ class _DashboardView:
     def get_content(self):
         s = self.backend._status
         return [
-            ('class:title', '\n  Dashboard\n'),
-            ('', '\n'),
-            ('class:info', '  ┌─ Configuration ─────────────────────────────────────\n'),
-            ('class:info', '  │  Provider     '), ('class:status-provider', f'{s.provider or "—"}\n'),
-            ('class:info', '  │  Model        '), ('', f'{s.model or "—"}\n'),
-            ('class:info', '  │  API Key      '),
-            ('class:success' if s.api_key_set else 'class:warning',
-             f'{"✓ configured" if s.api_key_set else "✗ not set"}\n'),
-            ('', '\n'),
-            ('class:info', '  ┌─ Current Session ────────────────────────────────────\n'),
-            ('class:info', '  │  Name         '), ('class:success', f'{s.session or "none"}\n'),
-            ('class:info', '  │  Messages     '), ('', f'{s.message_count}\n'),
-            ('', '\n'),
-            ('class:info', '  ┌─ Usage Statistics ──────────────────────────────────\n'),
-            ('class:info', '  │  Tokens       '), ('class:success', f'{s.total_tokens:,}\n'),
-            ('class:info', '  │  Est. Cost    '), ('class:warning', f'${s.total_cost:.4f}\n'),
-            ('', '\n'),
-            ('class:info', f'  Total sessions: {len(self.backend._sessions)}\n'),
+            ("class:title", "\n  Dashboard\n"),
+            ("", "\n"),
+            ("class:info", "  ┌─ Configuration ─────────────────────────────────────\n"),
+            ("class:info", "  │  Provider     "),
+            ("class:status-provider", f"{s.provider or '—'}\n"),
+            ("class:info", "  │  Model        "),
+            ("", f"{s.model or '—'}\n"),
+            ("class:info", "  │  API Key      "),
+            (
+                "class:success" if s.api_key_set else "class:warning",
+                f"{'✓ configured' if s.api_key_set else '✗ not set'}\n",
+            ),
+            ("", "\n"),
+            ("class:info", "  ┌─ Current Session ────────────────────────────────────\n"),
+            ("class:info", "  │  Name         "),
+            ("class:success", f"{s.session or 'none'}\n"),
+            ("class:info", "  │  Messages     "),
+            ("", f"{s.message_count}\n"),
+            ("", "\n"),
+            ("class:info", "  ┌─ Usage Statistics ──────────────────────────────────\n"),
+            ("class:info", "  │  Tokens       "),
+            ("class:success", f"{s.total_tokens:,}\n"),
+            ("class:info", "  │  Est. Cost    "),
+            ("class:warning", f"${s.total_cost:.4f}\n"),
+            ("", "\n"),
+            ("class:info", f"  Total sessions: {len(self.backend._sessions)}\n"),
         ]
 
     def get_footer(self):
         return [
-            ('class:hint', ' /'),
-            ('class:hint-dim', 'chat '),
-            ('class:hint', '/'),
-            ('class:hint-dim', 'sessions '),
-            ('class:hint', '/'),
-            ('class:hint-dim', 'menu '),
-            ('class:hint', '/'),
-            ('class:hint-dim', 'quit '),
-            ('class:hint', '│ Ctrl+C'),
-            ('class:hint-dim', ' back'),
+            ("class:hint", " /"),
+            ("class:hint-dim", "chat "),
+            ("class:hint", "/"),
+            ("class:hint-dim", "sessions "),
+            ("class:hint", "/"),
+            ("class:hint-dim", "menu "),
+            ("class:hint", "/"),
+            ("class:hint-dim", "quit "),
+            ("class:hint", "│ Ctrl+C"),
+            ("class:hint-dim", " back"),
         ]
 
     def run(self) -> UIView | None:
@@ -1334,12 +1347,12 @@ class _DashboardView:
 
         kb = KeyBindings()
 
-        @kb.add('c-c')
+        @kb.add("c-c")
         def exit_(event):
             self.exit_to = UIView.MENU
             event.app.exit()
 
-        @kb.add('tab')
+        @kb.add("tab")
         def tab(event):
             buff = event.app.current_buffer
             if buff.complete_state:
@@ -1347,30 +1360,41 @@ class _DashboardView:
             else:
                 buff.start_completion(select_first=False)
 
-        @kb.add('backspace')
+        @kb.add("backspace")
         def backspace(event):
             buff = event.app.current_buffer
             buff.delete_before_cursor(1)
-            if buff.text.startswith('/'):
+            if buff.text.startswith("/"):
                 buff.start_completion(select_first=False)
 
-        body = HSplit([
-            Window(FormattedTextControl(self.get_header), height=1),
-            Window(char='─', height=1, style='class:frame'),
-            Window(FormattedTextControl(self.get_content)),
-            Window(FormattedTextControl(self.get_footer), height=1),
-            Window(char='─', height=1, style='class:frame'),
-            input_area,
-        ])
+        body = HSplit(
+            [
+                Window(FormattedTextControl(self.get_header), height=1),
+                Window(char="─", height=1, style="class:frame"),
+                Window(FormattedTextControl(self.get_content)),
+                Window(FormattedTextControl(self.get_footer), height=1),
+                Window(char="─", height=1, style="class:frame"),
+                input_area,
+            ]
+        )
 
-        layout = Layout(FloatContainer(
-            content=body,
-            floats=[Float(xcursor=True, ycursor=True,
-                         content=CompletionsMenu(max_height=16, scroll_offset=1))],
-        ))
+        layout = Layout(
+            FloatContainer(
+                content=body,
+                floats=[
+                    Float(
+                        xcursor=True,
+                        ycursor=True,
+                        content=CompletionsMenu(max_height=16, scroll_offset=1),
+                    )
+                ],
+            )
+        )
         layout.focus(input_area)
 
-        app = Application(layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True)
+        app = Application(
+            layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True
+        )
         app.run()
         return self.exit_to
 
@@ -1378,7 +1402,7 @@ class _DashboardView:
 class _ConfigWizard:
     """Configuration wizard."""
 
-    def __init__(self, backend: 'RichBackend'):
+    def __init__(self, backend: "RichBackend"):
         self.backend = backend
 
     def run(self) -> bool:
