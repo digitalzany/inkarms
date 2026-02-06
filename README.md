@@ -63,8 +63,8 @@ pip install "inkarms[platforms]"
 # Initialize your config (and secrets)
 inkarms config init
 
-# Interactive mode (The TUI - It's pretty)
-inkarms chat
+# Interactive mode (menu, chat, dashboard, sessions - it's pretty)
+inkarms
 
 # One-off command
 inkarms run "Check the git status of this repo and summarize the last 5 commits" --tools
@@ -107,10 +107,10 @@ Unlike standard LLM scripts that forget you instantly, InkArms keeps track of yo
 *   **Handoffs:** Saves state to `HANDOFF.md` when things get too complex, allowing you to "reboot" the agent with fresh context but full history.
 *   **Session Logs:** Every session is saved to a local SQLite database or file for later review.
 
-### 🖥️ TUI & Wizard
+### 🖥️ Interactive UI & Wizard
 We believe terminal tools should be pretty.
 *   **Interactive Setup:** `inkarms config init` runs a wizard that guides you through provider selection and security settings.
-*   **Chat Interface:** `inkarms chat` launches a full-featured terminal chat app with streaming responses, syntax highlighting, and real-time tool execution status.
+*   **Full UI:** `inkarms` launches an interactive terminal app with menu, chat, dashboard, session management, streaming responses, syntax highlighting, and real-time tool execution status. Built with Rich + prompt_toolkit, with a pluggable backend system.
 
 ### 🔌 Provider Agnostic (LiteLLM)
 Don't get locked into one vendor. InkArms sits on top of [LiteLLM](https://github.com/BerriAI/litellm), giving you instant access to 100+ models.
@@ -123,7 +123,7 @@ Don't get locked into one vendor. InkArms sits on top of [LiteLLM](https://githu
 Detailed documentation is available in the `docs/` directory:
 
 - [**User Guide**](docs/user_guide.md) — Getting started
-- [**TUI Guide**](docs/tui_guide.md) — Chat interface & config wizard
+- [**UI Guide**](docs/tui_guide.md) — Interactive interface, chat & config wizard
 - [**Platform Setup**](docs/platforms.md) — Telegram, Slack, Discord
 - [**Advanced Tools**](docs/advanced_tool_use.md) — HTTP, Python, Git
 - [**Security & Sandbox**](docs/security.md) — Safety features

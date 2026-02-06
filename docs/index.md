@@ -7,7 +7,7 @@ Welcome to the InkArms documentation! Like an octopus navigating the ocean depth
 | Document | Description |
 |----------|-------------|
 | [User Guide](user_guide.md) | Start here! Get InkArms up and running |
-| [TUI Guide](tui_guide.md) | Interactive chat and configuration wizard |
+| [UI Guide](tui_guide.md) | Interactive chat, views, and configuration wizard |
 | [Platform Setup](platforms.md) | Set up Telegram, Slack, Discord bots |
 | [Advanced Tool Use](advanced_tool_use.md) | HTTP requests, Python eval, Git ops, streaming |
 | [GitHub Copilot](github_copilot.md) | Use GitHub Copilot as a provider |
@@ -51,7 +51,7 @@ InkArms is under active development. Completed milestones:
 - **Phase 1, Milestone 1.4**: Basic Skills (loading, parsing, injection) ✅
 - **Phase 1, Milestone 1.5**: Context & Memory (token tracking, compaction, handoffs) ✅
 - **Phase 1, Milestone 1.6**: Security & Sandbox (command filtering, audit logging) ✅
-- **Phase 1, Milestone 1.7**: TUI (interactive chat, configuration wizard) ✅
+- **Phase 1, Milestone 1.7**: UI (pluggable backend, interactive chat, configuration wizard) ✅
 - **Phase 1, Milestone 1.8**: Multi-Platform Messaging (Telegram, Slack, Discord) ✅
 - **Phase 1, Milestone 1.10**: Advanced Tool Use (HTTP, Python, Git, streaming, metrics) ✅
 
@@ -62,7 +62,7 @@ InkArms is under active development. Completed milestones:
 
 ## Version
 
-This documentation is for InkArms v0.11.0 (Phase 1 complete with TUI).
+This documentation is for InkArms v0.11.0 (Phase 1 complete with pluggable UI).
 
 ---
 

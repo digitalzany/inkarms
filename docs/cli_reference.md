@@ -12,24 +12,24 @@ These options work with any command:
 | `--verbose` | `-v` | Enable verbose output |
 | `--quiet` | `-q` | Minimal output |
 | `--profile` | `-p` | Use specific config profile |
+| `--ui` | | UI backend selection (auto, rich, textual) |
 | `--no-color` | | Disable colored output |
 | `--help` | `-h` | Show help message |
 
 ## Command Overview
 
 ```
-inkarms
-├── run          # Execute AI queries
-├── chat         # Interactive TUI chat interface
-├── config       # Configuration management
-├── skill        # Skill management
-├── tools        # Tool management
-├── memory       # Memory and context
-├── status       # Health and monitoring
-├── audit        # Audit logs
-├── profile      # Profile management
-├── platforms    # Platform messaging
-└── interactive  # REPL mode (coming soon)
+inkarms              # Launch interactive UI (default, no subcommand)
+├── run              # Execute AI queries
+├── ui               # Launch UI with explicit backend selection
+├── config           # Configuration management
+├── skill            # Skill management
+├── tools            # Tool management
+├── memory           # Memory and context
+├── status           # Health and monitoring
+├── audit            # Audit logs
+├── profile          # Profile management
+└── platforms        # Platform messaging
 ```
 
 ---
@@ -234,13 +234,13 @@ inkarms config init [OPTIONS]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--quick` | `-q` | CLI inline wizard (instead of TUI) |
+| `--quick` | `-q` | CLI inline wizard (instead of interactive UI) |
 | `--force` | `-f` | Force overwrite (only valid with `--quick`) |
 
 #### Wizard Modes
 
-**TUI Mode (Default):**
-Opens a beautiful terminal wizard with two options:
+**Interactive Mode (Default):**
+Opens a terminal wizard with two options:
 - **QuickStart** (2 minutes) - Essential settings only
 - **Advanced** (10-15 minutes) - Full 8-section configuration
 
@@ -250,7 +250,7 @@ Inline command-line prompts using questionary.
 #### Examples
 
 ```bash
-# Open TUI wizard (recommended)
+# Open interactive wizard (recommended)
 inkarms config init
 
 # CLI inline wizard
@@ -266,7 +266,7 @@ inkarms config init --quick --force
 - `~/.inkarms/config.yaml` with your settings
 - Encrypted API key storage (if provided)
 
-See [TUI Guide](tui_guide.md) for wizard walkthrough.
+See [UI Guide](tui_guide.md) for wizard walkthrough.
 
 ---
 
@@ -710,56 +710,70 @@ inkarms profile delete NAME [OPTIONS]
 
 ---
 
-## inkarms chat
+## inkarms (no subcommand)
 
-Launch the interactive TUI chat interface.
+Launch the interactive UI. This is the default behavior when running `inkarms` without arguments.
 
 ```bash
-inkarms chat [OPTIONS]
+inkarms [OPTIONS]
 ```
 
 ### Options
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--session` | `-s` | Session ID for conversation tracking (default: "default") |
+| `--ui` | | UI backend: auto, rich, textual (default: auto) |
+| `--profile` | `-p` | Use specific config profile |
 
 ### Examples
 
 ```bash
-# Start chat with default session
-inkarms chat
+# Launch UI with default settings
+inkarms
 
-# Start chat with named session
-inkarms chat --session my-project
-inkarms chat -s project-alpha
-
-# Different sessions maintain separate conversation history
-inkarms chat -s work
-inkarms chat -s personal
+# Launch with specific backend
+inkarms --ui rich
+inkarms --ui textual
 ```
 
 ### Features
 
-- **Streaming responses** - AI responses update incrementally
-- **Tool execution indicators** - See when tools are running
-- **Session tracking** - Token usage and cost displayed
-- **Markdown rendering** - Rich text formatting
-- **Keyboard shortcuts** - Q to quit, Enter to send
+The UI provides these views (navigable via main menu or slash commands):
+- **Menu** - Main navigation hub
+- **Chat** - Conversational AI interface with streaming, markdown, and tool execution
+- **Dashboard** - Session stats, provider status
+- **Sessions** - Create, switch, and manage conversation sessions
+- **Config** - Configuration wizard (QuickStart + Advanced)
+- **Settings** - Quick settings adjustments
 
-See [TUI Guide](tui_guide.md) for complete documentation.
+See [UI Guide](tui_guide.md) for complete documentation.
 
 ---
 
-## inkarms interactive
+## inkarms ui
 
-Start REPL mode for continuous interaction.
+Explicitly launch the UI with backend selection.
 
 ```bash
-inkarms interactive [OPTIONS]
+inkarms ui [OPTIONS]
 ```
 
-*Coming soon - use `inkarms chat` for interactive TUI*
+### Options
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--backend` | `-b` | UI backend: auto, rich, textual (default: auto) |
+
+### Examples
+
+```bash
+# Launch with default backend (Rich)
+inkarms ui
+
+# Launch with specific backend
+inkarms ui --backend rich
+inkarms ui --backend textual
+```
 
 ---
 

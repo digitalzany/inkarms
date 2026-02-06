@@ -1,20 +1,22 @@
-# TUI User Guide
+# UI Guide
 
-InkArms provides a beautiful Terminal User Interface (TUI) built with [Textual](https://textual.textualize.io/) for interactive configuration and chat.
+InkArms provides an interactive terminal interface with a pluggable backend system. The default backend uses [Rich](https://github.com/Textualize/rich) for rendering and [prompt_toolkit](https://github.com/prompt-toolkit/python-prompt-toolkit) for full-screen layout and input handling.
 
 ## Quick Start
 
-### Launch Chat Interface
+### Launch the UI
 
 ```bash
-inkarms chat
+# Simply run inkarms with no arguments
+inkarms
 ```
 
-This opens an interactive chat interface where you can:
-- Send messages to the AI
-- See streaming responses in real-time
-- View tool execution indicators
-- Track token usage and costs
+This opens the main menu where you can:
+- Start a new chat or continue an existing session
+- View the dashboard with session stats and provider status
+- Manage sessions
+- Run the configuration wizard
+- Adjust settings
 
 ### Launch Configuration Wizard
 
@@ -31,74 +33,93 @@ This opens an interactive configuration wizard with two modes:
 ### Layout
 
 ```
-┌─────────────────────────────────────────────────────┐
-│  InkArms Chat                              12:34:56 │
-├─────────────────────────────────────┬───────────────┤
-│                                     │ Session Info  │
-│  System                             │               │
-│  Welcome to InkArms!                │ Model:        │
-│                                     │ claude-sonnet │
-│  You · 12:34:00                     │               │
-│  Hello!                             │ Tokens: 1,234 │
-│                                     │               │
-│  AI · 12:34:02                      │ Cost: $0.01   │
-│  Hello! How can I help you today?   │               │
-│                                     │ Session:      │
-│  ⚙️ Executing: http_request...      │ default       │
-│                                     │               │
-│  AI · 12:34:05                      ├───────────────┤
-│  Here's what I found... ▋           │ [Clear Chat]  │
-│                                     │ [Exit]        │
-├─────────────────────────────────────┴───────────────┤
-│ Type your message...                         [Send] │
-├─────────────────────────────────────────────────────┤
-│ Q: Quit                                             │
-└─────────────────────────────────────────────────────┘
++-----------------------------------------------------+
+|  InkArms Chat                              12:34:56  |
++-----------------------------------------------------+
+|                                                       |
+|  System                                               |
+|  Welcome to InkArms!                                  |
+|                                                       |
+|  You - 12:34:00                                       |
+|  Hello!                                               |
+|                                                       |
+|  AI - 12:34:02                                        |
+|  Hello! How can I help you today?                     |
+|                                                       |
++-----------------------------------------------------+
+|  Provider: anthropic | Model: claude-sonnet | $0.01  |
++-----------------------------------------------------+
+|  > Type your message... (Enter to send)              |
++-----------------------------------------------------+
 ```
 
 ### Features
 
 **Message Display:**
-- User messages shown with primary color border
-- AI responses with accent color border
-- System messages with warning color border
+- User messages shown with primary color styling
+- AI responses with accent color and full markdown rendering
+- System messages with warning color styling
+- Syntax-highlighted code blocks
 - Timestamps for each message
-- Markdown rendering for AI responses
 
 **Streaming Responses:**
 - AI responses update incrementally as tokens arrive
-- Cursor indicator (▋) shows response is still generating
+- Cursor indicator shows response is still generating
 - Smooth scrolling to latest message
 
 **Tool Execution:**
 - Real-time indicators when tools are running
-- Shows tool name: "⚙️ Executing: http_request..."
+- Shows tool name during execution
 - Indicators disappear when tool completes
 
 **Session Tracking:**
-- Current model displayed
+- Current provider and model displayed in status bar
 - Token usage counter
 - Cost tracking
-- Session ID
+- Session name
+
+### Slash Commands
+
+Type `/` in the chat input to access commands (with tab completion):
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands |
+| `/menu` | Return to main menu |
+| `/dashboard` | Show dashboard view |
+| `/sessions` | Manage sessions |
+| `/config` | Open configuration wizard |
+| `/clear` | Clear conversation history |
+| `/usage` | Show token/cost usage |
+| `/status` | Show provider status |
+| `/model <name>` | Switch model |
+| `/model` | Show current model |
+| `/save` | Save current session |
+| `/load` | Load a session |
+| `/history` | Show conversation history |
+| `/chat` | Return to chat view |
+| `/quit` | Exit InkArms |
 
 ### Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
 | `Enter` | Send message |
-| `Q` | Quit chat |
-| `Ctrl+C` | Quit chat |
+| `Tab` | Autocomplete slash commands |
+| `Ctrl+C` | Exit |
 
-### Command Options
+## Views
 
-```bash
-# Default session
-inkarms chat
+The UI provides several views accessible from the main menu or via slash commands:
 
-# Named session
-inkarms chat --session my-project
-inkarms chat -s my-project
-```
+| View | Description |
+|------|-------------|
+| **Menu** | Main navigation hub (shown on startup) |
+| **Chat** | Conversational AI interface |
+| **Dashboard** | Session stats, provider status |
+| **Sessions** | Create, switch, and manage sessions |
+| **Config** | Configuration wizard (QuickStart + Advanced) |
+| **Settings** | Quick settings adjustments |
 
 ## Configuration Wizard
 
@@ -139,13 +160,13 @@ inkarms chat -s my-project
 | 4. Tools | Enable tools, approval mode, iterations |
 | 5. Skills | Enable skills, auto-inject, indexing |
 | 6. Cost | Cost tracking, daily/monthly budgets |
-| 7. TUI | Theme, animations, timestamps |
+| 7. UI | Theme, status bar, timestamps |
 | 8. General | Output format, verbose, telemetry |
 
 ### Navigation
 
-- **Next →** - Proceed to next section
-- **← Back** - Return to previous section
+- **Next** - Proceed to next section
+- **Back** - Return to previous section
 - **Cancel** - Exit wizard without saving
 - **Review & Save** - Preview and save configuration
 
@@ -156,18 +177,60 @@ The wizard creates `~/.inkarms/config.yaml` with all your settings.
 Next steps shown on success screen:
 1. Set API key (if skipped): `inkarms config set-secret <provider>`
 2. Test setup: `inkarms run "Hello!"`
-3. Start chatting: `inkarms chat`
+3. Start the UI: `inkarms`
+
+## Backend Selection
+
+InkArms supports multiple UI backends:
+
+| Backend | Description | Dependencies |
+|---------|-------------|-------------|
+| **Rich** (default) | Rich + prompt_toolkit | Included in base install |
+| **Textual** (optional) | Textual framework | `pip install inkarms[textual]` |
+
+Select the backend via CLI flag or config:
+
+```bash
+# Via CLI flag
+inkarms --ui rich
+inkarms --ui textual
+
+# Via explicit ui command
+inkarms ui --backend rich
+
+# Via config
+# ~/.inkarms/config.yaml
+ui:
+  backend: "auto"  # auto | rich | textual
+```
+
+In `auto` mode (default), InkArms prefers Rich and falls back to Textual if available.
 
 ## Command Reference
 
-### Chat Command
+### Launch UI (Default)
 
 ```bash
-inkarms chat [OPTIONS]
+inkarms [OPTIONS]
 
 Options:
-  -s, --session TEXT  Session ID for conversation tracking [default: default]
-  --help              Show this message and exit
+  --ui [auto|rich|textual]  UI backend to use [default: auto]
+  -V, --version             Show version
+  -v, --verbose             Enable verbose output
+  -q, --quiet               Minimal output
+  -p, --profile TEXT        Use specific config profile
+  --no-color                Disable colored output
+  --help                    Show this message and exit
+```
+
+### Launch UI (Explicit)
+
+```bash
+inkarms ui [OPTIONS]
+
+Options:
+  -b, --backend [auto|rich|textual]  UI backend [default: auto]
+  --help                             Show this message and exit
 ```
 
 ### Config Init Command
@@ -176,27 +239,31 @@ Options:
 inkarms config init [OPTIONS]
 
 Options:
-  -q, --quick  CLI inline wizard (instead of TUI)
+  -q, --quick  CLI inline wizard (instead of interactive UI)
   -f, --force  Force overwrite (only valid with --quick)
   --help       Show this message and exit
 ```
 
 **Modes:**
-- Default (no flags): Opens TUI wizard
+- Default (no flags): Opens interactive UI wizard
 - `--quick`: CLI inline wizard (questionary prompts)
 - `--quick --force`: Non-interactive for automation
 
 ## Customization
 
-### Themes
+### UI Configuration
 
-Configure in Advanced wizard Section 7 or `config.yaml`:
+Configure in `~/.inkarms/config.yaml`:
 
 ```yaml
-tui:
-  theme: default  # default, light, high_contrast
-  enable_animations: true
-  show_timestamps: true
+ui:
+  backend: "auto"         # auto | rich | textual
+  theme: "default"        # Theme name
+  show_status_bar: true   # Show status bar in chat
+  show_timestamps: true   # Show message timestamps
+  max_messages_display: 20  # Messages to display (5-100)
+  enable_mouse: true      # Enable mouse support
+  enable_completion: true # Enable slash command completion
 ```
 
 ### Session Management
@@ -204,17 +271,17 @@ tui:
 Sessions track conversation history:
 
 ```bash
-# Different sessions for different projects
-inkarms chat -s project-alpha
-inkarms chat -s project-beta
+# Sessions are managed through the UI
+inkarms
+# Then use /sessions slash command or Sessions menu item
 
 # Sessions persist between runs
-inkarms chat -s project-alpha  # Continues previous conversation
+# Switch between sessions for different projects
 ```
 
 ## Troubleshooting
 
-### TUI Not Displaying Correctly
+### UI Not Displaying Correctly
 
 **Issue:** Characters or layout broken
 
@@ -232,14 +299,14 @@ inkarms chat -s project-alpha  # Continues previous conversation
 2. Try: `export TERM=xterm-256color`
 3. Use `--no-color` flag for plain output
 
-### Input Not Working
+### Trying Textual Backend
 
-**Issue:** Can't type or send messages
+**Issue:** Want to try the Textual backend
 
 **Solutions:**
-1. Click in the input field first
-2. Make sure focus is on the input area
-3. Try resizing terminal window
+1. Install: `pip install inkarms[textual]`
+2. Launch: `inkarms --ui textual`
+3. Note: Textual backend is not yet fully implemented; use Rich (default) for production use
 
 ### OAuth Not Working (GitHub Copilot)
 

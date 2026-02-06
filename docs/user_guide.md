@@ -75,7 +75,7 @@ inkarms config list-secrets
 Run the interactive configuration wizard:
 
 ```bash
-# Open the TUI configuration wizard (recommended)
+# Open the interactive configuration wizard (recommended)
 inkarms config init
 ```
 
@@ -86,7 +86,7 @@ The wizard offers two modes:
 Alternatively, use the CLI inline wizard:
 
 ```bash
-# CLI mode (for terminals without TUI support)
+# CLI mode (for terminals without interactive UI support)
 inkarms config init --quick
 ```
 
@@ -131,23 +131,29 @@ inkarms run "Hello! Tell me a fun fact about octopi."
 
 If you see a response, you're ready to roll! 🎉
 
-### 6. Start Chatting (Interactive Mode)
+### 6. Start the Interactive UI
 
-For a more interactive experience, use the TUI chat interface:
+For a full interactive experience, launch InkArms with no arguments:
 
 ```bash
-inkarms chat
+inkarms
 ```
 
-Features:
+This opens the main menu where you can navigate to:
+- **Chat** — Conversational AI interface with streaming responses
+- **Dashboard** — Session stats and provider status
+- **Sessions** — Manage conversation sessions
+- **Config** — Run the configuration wizard
+- **Settings** — Adjust settings
+
+Features in chat:
 - **Streaming responses** — See AI responses as they're generated
 - **Tool execution** — Watch tools run in real-time
 - **Session tracking** — Token usage and costs displayed
 - **Markdown rendering** — Rich formatted output
+- **Slash commands** — Type `/help` for available commands
 
-Press `Q` to exit, `Enter` to send messages.
-
-See [TUI Guide](tui_guide.md) for complete documentation.
+See [UI Guide](tui_guide.md) for complete documentation.
 
 ## Basic Usage
 
@@ -204,15 +210,17 @@ inkarms run "Write documentation" --output docs.md
 InkArms is organized into command groups, each representing a different "arm":
 
 ```
-inkarms
-├── run          # Execute AI queries (the main arm)
-├── config       # Configuration management
-├── skill        # Skill management
-├── memory       # Memory and context
-├── status       # Health and monitoring
-├── audit        # Audit logs
-├── profile      # Profile management
-└── tui          # Interactive interface
+inkarms              # Launch interactive UI (default, no subcommand)
+├── run              # Execute AI queries (the main arm)
+├── ui               # Launch UI with explicit backend selection
+├── config           # Configuration management
+├── skill            # Skill management
+├── tools            # Tool management
+├── memory           # Memory and context
+├── status           # Health and monitoring
+├── audit            # Audit logs
+├── profile          # Profile management
+└── platforms        # Platform messaging (Telegram, Slack, Discord)
 ```
 
 ### Global Options
@@ -225,6 +233,7 @@ These work with any command:
 | `--verbose` | `-v` | Verbose output |
 | `--quiet` | `-q` | Minimal output |
 | `--profile` | `-p` | Use specific profile |
+| `--ui` | | UI backend (auto, rich, textual) |
 | `--no-color` | | Disable colors |
 | `--help` | `-h` | Show help |
 

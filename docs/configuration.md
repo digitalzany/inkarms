@@ -242,24 +242,37 @@ skills:
     check_interval_hours: 24
 
 # =============================================================================
-# TUI
+# UI
 # =============================================================================
-tui:
-  enable: true
-  theme: "dark"  # dark | light | auto
-  keybindings: "default"  # default | vim | emacs
+ui:
+  # Backend selection (auto prefers Rich, falls back to Textual)
+  backend: "auto"  # auto | rich | textual
 
-  chat:
-    show_timestamps: true
-    show_token_count: true
-    show_cost: true
-    markdown_rendering: true
-    code_highlighting: true
+  # Theme
+  theme: "default"
 
-  status_bar:
-    show_model: true
-    show_context_usage: true
-    show_session_cost: true
+  # Display options
+  show_status_bar: true
+  show_timestamps: true
+  max_messages_display: 20  # 5-100
+
+  # Input options
+  enable_mouse: true
+  enable_completion: true
+
+# Legacy TUI config (still recognized for backward compatibility)
+# tui:
+#   enable: true
+#   theme: "dark"
+#   keybindings: "default"
+#   chat:
+#     show_timestamps: true
+#     show_token_count: true
+#     show_cost: true
+#   status_bar:
+#     show_model: true
+#     show_context_usage: true
+#     show_session_cost: true
 
 # =============================================================================
 # COST TRACKING
