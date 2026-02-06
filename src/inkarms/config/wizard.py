@@ -6,10 +6,7 @@ Provides two-level setup experience:
 - Advanced: Full configuration with all options and explanations
 """
 
-import getpass
-import os
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
 import questionary
@@ -18,7 +15,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 
-from inkarms.config.setup import create_default_config, create_directory_structure
+from inkarms.config.setup import create_directory_structure
 from inkarms.secrets import SecretsManager
 from inkarms.storage.paths import get_global_config_path, get_inkarms_home
 
