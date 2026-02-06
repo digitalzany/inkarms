@@ -5,6 +5,8 @@ This is the default, lightweight UI backend using Rich for formatting
 and prompt_toolkit for full-screen applications and input handling.
 """
 
+from __future__ import annotations
+
 import traceback
 import asyncio
 import concurrent.futures
@@ -32,9 +34,11 @@ from prompt_toolkit.layout import (
 )
 from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.menus import CompletionsMenu
+from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.widgets import TextArea
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.panel import Panel
 from rich.text import Text
 
 from inkarms.config.theme import LOGO, STYLE, THEME_STYLES
@@ -117,7 +121,14 @@ def _render_markdown_to_tuples(text: str, width: int = 100) -> list:
     return list(to_formatted_text(ANSI(ansi_output)))
 
 
-def _render_markdown_ansi(text: str, width: int = 100, style: str = "") -> str:
+def _render_markdown_ansi(
+    text: str,
+    width: int = 100,
+    style: str = "",
+    wrap_in_panel: bool = False,
+    panel_title: str | None = None,
+    panel_border_style: str = "blue",
+) -> str:
     """Render markdown to ANSI-formatted string using Rich."""
     console = Console(
         file=io.StringIO(),
@@ -127,7 +138,20 @@ def _render_markdown_ansi(text: str, width: int = 100, style: str = "") -> str:
         highlight=False,
     )
     md = Markdown(text, code_theme="monokai", style=style)
-    console.print(md)
+
+    if wrap_in_panel:
+        renderable = Panel(
+            md,
+            title=panel_title,
+            style=style,  # Panel content style
+            border_style=panel_border_style,
+            expand=False,  # Let it fill width
+            padding=(0, 1),
+        )
+    else:
+        renderable = md
+
+    console.print(renderable)
     return console.file.getvalue().rstrip()
 
 
@@ -142,7 +166,7 @@ def _render_styled_text(text: str, style_str: str) -> str:
     return console.file.getvalue()
 
 
-class AnsiLexer:
+class AnsiLexer(Lexer):
     """Lexer that interprets ANSI escape codes and returns styled fragments."""
 
     def lex_document(self, document):
@@ -751,11 +775,15 @@ class _TextInput:
             self.cancelled = True
             event.app.exit()
 
+        def _accept_and_exit(buff: Buffer) -> bool:
+            get_app().exit()
+            return True
+
         text_area = TextArea(
             text=self.default,
             multiline=False,
             password=self.password,
-            accept_handler=lambda buff: get_app().exit(),
+            accept_handler=_accept_and_exit,
         )
 
         def get_title():
@@ -1007,13 +1035,17 @@ class _ChatView:
         from prompt_toolkit.widgets import Frame, TextArea
 
         # Input area with command completion
+        def _on_accept_handler(buff: Buffer) -> bool:
+            self._on_accept(buff)
+            return True
+
         input_area = TextArea(
             height=1,
             multiline=False,
             wrap_lines=False,
             completer=COMMAND_COMPLETER,
             complete_while_typing=True,
-            accept_handler=lambda buff: self._on_accept(buff),
+            accept_handler=_on_accept_handler,
             style="class:user-input",
         )
 
@@ -1111,6 +1143,12 @@ class _ChatView:
             lines = []
             messages = self.backend._messages
 
+            # Calculate available width (fallback to 100 if app not fully ready)
+            try:
+                width = get_app().output.get_size().columns - 4
+            except Exception:
+                width = 100
+
             if not messages and not self.streaming:
                 lines.append("  Start typing to chat...")
                 lines.append("  Type /help for commands")
@@ -1127,13 +1165,15 @@ class _ChatView:
                         )
                         lines.append("")
                     else:
-                        lines.append(
-                            _render_styled_text(f"{ts}Assistant:", THEME_STYLES["assistant"])
-                        )
-                        # Render markdown to plain text with ANSI via Rich
+                        # For assistant, we use a Panel and omit the separate header
                         try:
                             rendered = _render_markdown_ansi(
-                                msg.content, style=THEME_STYLES.get("assistant-text", "")
+                                msg.content,
+                                width=width,
+                                style=THEME_STYLES.get("assistant-text", ""),
+                                wrap_in_panel=True,
+                                panel_title=f"{ts}Assistant",
+                                panel_border_style=THEME_STYLES["assistant"],
                             )
                             lines.append(rendered)
                         except Exception:
@@ -1141,17 +1181,23 @@ class _ChatView:
                         lines.append("")
 
             if self.streaming:
-                lines.append(_render_styled_text("Assistant:", THEME_STYLES["assistant"]))
+                # Streaming content
                 if self.streaming_content:
                     try:
+                        # Render partially completed content in a panel
                         rendered = _render_markdown_ansi(
-                            self.streaming_content,
+                            self.streaming_content + "▌",
+                            width=width,
                             style=THEME_STYLES.get("assistant-text", ""),
+                            wrap_in_panel=True,
+                            panel_title="Assistant (thinking...)",
+                            panel_border_style=THEME_STYLES["assistant"],
                         )
-                        lines.append(rendered + "▌")
+                        lines.append(rendered)
                     except Exception:
                         lines.append(self.streaming_content + "▌")
                 else:
+                    lines.append(_render_styled_text("Assistant:", THEME_STYLES["assistant"]))
                     lines.append("thinking...▌")
 
             if self.pending_message:
@@ -1332,7 +1378,7 @@ class _DashboardView:
             complete_while_typing=True,
         )
 
-        def handle(buff):
+        def handle(buff: Buffer) -> bool:
             cmd = buff.text.strip().lower()
             buff.reset()
             if cmd in ("/chat", "/c"):
@@ -1347,6 +1393,7 @@ class _DashboardView:
             elif cmd in ("/quit", "/q"):
                 self.exit_to = None  # Signal to quit
                 get_app().exit()
+            return True
 
         input_area.accept_handler = handle
 

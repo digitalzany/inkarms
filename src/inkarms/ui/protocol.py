@@ -12,6 +12,7 @@ from enum import Enum
 
 class UIView(str, Enum):
     """Available UI views."""
+
     MENU = "menu"
     CHAT = "chat"
     DASHBOARD = "dashboard"
@@ -23,6 +24,7 @@ class UIView(str, Enum):
 @dataclass
 class UIConfig:
     """Configuration for UI backend."""
+
     theme: str = "default"
     show_status_bar: bool = True
     show_timestamps: bool = True
@@ -34,6 +36,7 @@ class UIConfig:
 @dataclass
 class ChatMessage:
     """A chat message for display."""
+
     role: str  # "user", "assistant", "system"
     content: str
     timestamp: str
@@ -43,6 +46,7 @@ class ChatMessage:
 @dataclass
 class SessionInfo:
     """Session information for display."""
+
     name: str
     message_count: int
     created: str
@@ -53,6 +57,7 @@ class SessionInfo:
 @dataclass
 class StatusInfo:
     """Status information for status bar."""
+
     provider: str | None = None
     model: str | None = None
     session: str | None = None
@@ -82,7 +87,7 @@ class UIBackend(ABC):
         ...
 
     @abstractmethod
-    def run_main_menu(self) -> UIView:
+    def run_main_menu(self) -> UIView | None:
         """Display main menu and return selected view."""
         ...
 
@@ -92,7 +97,7 @@ class UIBackend(ABC):
         ...
 
     @abstractmethod
-    def run_dashboard(self) -> UIView:
+    def run_dashboard(self) -> UIView | None:
         """Run dashboard interface. Returns next view to show."""
         ...
 
@@ -156,14 +161,16 @@ class UIBackend(ABC):
         ...
 
     @abstractmethod
-    def get_text_input(self, title: str, prompt: str = "> ",
-                       password: bool = False, default: str = "") -> str | None:
+    def get_text_input(
+        self, title: str, prompt: str = "> ", password: bool = False, default: str = ""
+    ) -> str | None:
         """Get text input with a title. Returns None if cancelled."""
         ...
 
     @abstractmethod
-    def get_selection(self, title: str, options: list[tuple[str, str, str]],
-                     subtitle: str = "") -> str | None:
+    def get_selection(
+        self, title: str, options: list[tuple[str, str, str]], subtitle: str = ""
+    ) -> str | None:
         """Show selection menu. Options are (value, label, description).
         Returns selected value or None if cancelled."""
         ...
