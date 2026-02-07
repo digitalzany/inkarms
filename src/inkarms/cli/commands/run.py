@@ -299,9 +299,10 @@ async def _run_completion(
                     response_text += chunk.content
                     live.update(Markdown(response_text))
 
+            summary = manager.get_cost_summary()
+
             # Track assistant response
             if session_manager:
-                summary = manager.get_cost_summary()
                 session_manager.add_assistant_message(
                     response_text,
                     model=resolved_model,
@@ -309,7 +310,6 @@ async def _run_completion(
                 )
 
             # Show cost info
-            summary = manager.get_cost_summary()
             if summary.total_cost > 0:
                 usage_info = ""
                 if session_manager:

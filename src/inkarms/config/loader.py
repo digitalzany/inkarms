@@ -211,65 +211,9 @@ def load_config(
     # 7. Validate and return
     try:
         return Config.model_validate(config_dict)
+
     except Exception as e:
         raise ConfigurationError(f"Configuration validation failed: {e}") from e
-
-
-def load_config_dict(
-    profile: str | None = None,
-    project_path: Path | None = None,
-    skip_project: bool = False,
-    skip_env: bool = False,
-) -> dict[str, Any]:
-    """
-    Load and merge configuration as a raw dictionary (without validation).
-
-    Useful for displaying or editing configuration.
-
-    Args:
-        profile: Profile name to load.
-        project_path: Starting path to search for project config.
-        skip_project: Skip loading project configuration.
-        skip_env: Skip environment variable overrides.
-
-    Returns:
-        Merged configuration dictionary.
-    """
-    # Start with defaults
-    config_dict = Config().model_dump()
-
-    # Load global config
-    global_path = get_global_config_path()
-    if global_path.exists():
-        global_config = load_yaml_file(global_path)
-        config_dict = deep_merge(config_dict, global_config)
-
-    # Determine profile
-    profile_name = profile or os.environ.get("INKARMS_PROFILE")
-    if not profile_name:
-        profile_name = get_nested_value(config_dict, "general.default_profile")
-
-    # Load profile config
-    if profile_name:
-        profile_path = get_profile_path(profile_name)
-        if profile_path.exists():
-            profile_config = load_yaml_file(profile_path)
-            profile_config.pop("_meta", None)
-            config_dict = deep_merge(config_dict, profile_config)
-
-    # Load project config
-    if not skip_project:
-        project_config_path = find_project_config(project_path)
-        if project_config_path and project_config_path.exists():
-            project_config = load_yaml_file(project_config_path)
-            project_config.pop("_meta", None)
-            config_dict = deep_merge(config_dict, project_config)
-
-    # Apply environment variables
-    if not skip_env:
-        config_dict = apply_env_overrides(config_dict)
-
-    return config_dict
 
 
 def get_config_sources() -> dict[str, Path | None]:

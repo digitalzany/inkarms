@@ -13,7 +13,6 @@ Usage:
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -29,16 +28,12 @@ from inkarms.config import (
     Config,
     ConfigurationError,
     get_config_sources,
-    get_nested_value,
     load_config,
-    load_config_dict,
     load_yaml_file,
     save_yaml_file,
     set_nested_value,
 )
 from inkarms.config.setup import (
-    create_default_config,
-    create_directory_structure,
     create_profile,
     create_project_config,
     is_initialized,
@@ -162,11 +157,13 @@ def show(
 
     try:
         # Load configuration
-        config_dict = load_config_dict(profile=profile)
+        config = load_config(profile=profile)
+        config_dict = config.model_dump()
 
         # Get specific section if requested
         if section:
-            value = get_nested_value(config_dict, section)
+            # value = get_nested_value(config_dict, section)
+            value = getattr(config, section, None)
             if value is None:
                 console.print(f"[red]Section '{section}' not found in configuration.[/red]")
                 raise typer.Exit(1)

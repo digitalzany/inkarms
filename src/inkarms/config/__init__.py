@@ -10,7 +10,6 @@ from inkarms.config.loader import (
     get_config,
     get_config_sources,
     load_config,
-    load_config_dict,
     load_yaml_file,
     save_yaml_file,
 )
@@ -68,7 +67,6 @@ __all__ = [
     "get_config",
     "get_config_sources",
     "load_config",
-    "load_config_dict",
     "load_yaml_file",
     "save_yaml_file",
     # Merger
