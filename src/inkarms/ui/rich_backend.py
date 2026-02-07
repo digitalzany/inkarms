@@ -42,6 +42,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from inkarms.config.theme import LOGO, STYLE, THEME_STYLES
+from inkarms.config.wizard import RichWizard
 from inkarms.memory import get_session_manager
 from inkarms.memory.models import Snapshot
 from inkarms.ui.protocol import ChatMessage, SessionInfo, StatusInfo, UIBackend, UIConfig, UIView
@@ -258,19 +259,19 @@ class RichBackend(UIBackend):
 
         try:
             from inkarms.config import get_config
+            from inkarms.config.setup import is_initialized
             from inkarms.providers import get_provider_manager
             from inkarms.skills import get_skill_manager
 
             self._app_config = get_config()
             self._provider_manager = get_provider_manager()
 
-            # Check if configured - look at providers.default (the actual schema field)
-            providers_cfg = self._app_config.providers
-            self._configured = bool(providers_cfg.default)
+            # Check if configured - verify config file exists
+            self._configured = is_initialized()
 
+            default_model = self._app_config.providers.default
             if self._configured:
                 # Extract provider name from model string (e.g., "anthropic/claude-..." -> "anthropic")
-                default_model = providers_cfg.default
                 provider_name = default_model.split("/")[0] if "/" in default_model else "unknown"
                 self._status.provider = provider_name
                 self._status.model = default_model
@@ -282,9 +283,7 @@ class RichBackend(UIBackend):
             if self._configured:
                 try:
                     self._session_manager = get_session_manager(model=default_model)
-                    self._session_persistence = SessionPersistence(
-                        self._session_manager.storage
-                    )
+                    self._session_persistence = SessionPersistence(self._session_manager.storage)
                     self._update_status_from_session()
 
                     # Check for pending handoff
@@ -330,9 +329,7 @@ class RichBackend(UIBackend):
                 elif current_view == UIView.CHAT:
                     if not self._current_session:
                         if not self._try_resume_recent_session():
-                            self.create_session(
-                                SessionPersistence.generate_session_name()
-                            )
+                            self.create_session(SessionPersistence.generate_session_name())
                     current_view = self.run_chat()
                 elif current_view == UIView.DASHBOARD:
                     current_view = self.run_dashboard()
@@ -380,7 +377,7 @@ class RichBackend(UIBackend):
 
     def run_config_wizard(self) -> bool:
         """Run configuration wizard."""
-        wizard = _ConfigWizard(self)
+        wizard = RichWizard(self)
         return wizard.run()
 
     def run_settings(self) -> UIView:
@@ -534,7 +531,7 @@ class RichBackend(UIBackend):
             ("class:status-bar", " "),
             ("class:status-provider", f"{self._status.provider or 'not configured'}"),
             ("class:status-bar", " / "),
-            ("class:status-model", f"{self._status.model or '—'}"),
+            ("class:status-model", f"{self._status.model.split('/')[0] if '/' in self._status.model else self._status.model or '—'}"),
             ("class:status-bar", " │ "),
             ("class:status-session", f"{self._status.session or 'no session'}"),
             ("class:status-bar", f" ({self._status.message_count})"),
@@ -635,9 +632,7 @@ class RichBackend(UIBackend):
         if self._session_manager:
             messages: list[Message] = []
             for msg_dict in self._session_manager.get_messages(include_system=True):
-                messages.append(
-                    Message(role=msg_dict["role"], content=msg_dict["content"])
-                )
+                messages.append(Message(role=msg_dict["role"], content=msg_dict["content"]))
             return messages
 
         # Fallback: single query without conversation history
@@ -655,7 +650,9 @@ class RichBackend(UIBackend):
                 cost_after = self._provider_manager.get_cost_summary().total_cost
                 cost_delta = cost_after - cost_before
             self._session_manager.add_assistant_message(
-                content, model=self._status.model, cost=cost_delta,
+                content,
+                model=self._status.model,
+                cost=cost_delta,
             )
             self._update_status_from_session()
         except Exception as e:
@@ -1139,10 +1136,12 @@ class _ChatView:
                 usage = self.backend._session_manager.get_context_usage()
                 percent = usage.usage_percent * 100
                 ctx_style = "class:warning" if usage.should_compact else "class:status-bar"
-                status.extend([
-                    ("class:status-bar", " | "),
-                    (ctx_style, f"ctx {percent:.0f}%"),
-                ])
+                status.extend(
+                    [
+                        ("class:status-bar", " | "),
+                        (ctx_style, f"ctx {percent:.0f}%"),
+                    ]
+                )
             except Exception:
                 pass
 
@@ -1156,10 +1155,17 @@ class _ChatView:
 
         # Navigation commands that exit the chat view
         nav_map = {
-            "/quit": None, "/q": None, "/exit": None,
-            "/menu": UIView.MENU, "/m": UIView.MENU,
-            "/dashboard": UIView.DASHBOARD, "/d": UIView.DASHBOARD,
-            "/sessions": UIView.SESSIONS, "/s": UIView.SESSIONS,
+            "/quit": None,
+            "/q": None,
+            "/exit": None,
+            "/menu": UIView.MENU,
+            "/m": UIView.MENU,
+            "/dashboard": UIView.DASHBOARD,
+            "/d": UIView.DASHBOARD,
+            "/sessions": UIView.SESSIONS,
+            "/s": UIView.SESSIONS,
+            "/config": UIView.CONFIG,
+            "/cfg": UIView.CONFIG,
         }
         if cmd in nav_map:
             self.exit_to = nav_map[cmd]
@@ -1567,8 +1573,7 @@ class _ChatView:
                         )
                     elif usage.should_compact:
                         self.pending_message = (
-                            f"Context at {usage.usage_percent * 100:.0f}% - "
-                            f"compaction recommended"
+                            f"Context at {usage.usage_percent * 100:.0f}% - compaction recommended"
                         )
                 except Exception:
                     pass
@@ -1633,15 +1638,23 @@ class _DashboardView:
                 usage = self.backend._session_manager.get_context_usage()
                 percent = usage.usage_percent * 100
                 ctx_style = "class:warning" if usage.should_compact else "class:success"
-                content.extend([
-                    ("", "\n"),
-                    ("class:info", "  ┌─ Context Window ────────────────────────────────────\n"),
-                    ("class:info", "  │  Usage        "),
-                    (ctx_style, f"{usage.current_tokens:,}/{usage.max_tokens:,} ({percent:.1f}%)\n"),
-                    ("class:info", "  │  Remaining    "),
-                    ("", f"{usage.tokens_remaining:,} tokens\n"),
-                    ("class:info", "  │  Status       "),
-                ])
+                content.extend(
+                    [
+                        ("", "\n"),
+                        (
+                            "class:info",
+                            "  ┌─ Context Window ────────────────────────────────────\n",
+                        ),
+                        ("class:info", "  │  Usage        "),
+                        (
+                            ctx_style,
+                            f"{usage.current_tokens:,}/{usage.max_tokens:,} ({percent:.1f}%)\n",
+                        ),
+                        ("class:info", "  │  Remaining    "),
+                        ("", f"{usage.tokens_remaining:,} tokens\n"),
+                        ("class:info", "  │  Status       "),
+                    ]
+                )
                 if usage.should_handoff:
                     content.append(("class:warning", "HANDOFF RECOMMENDED\n"))
                 elif usage.should_compact:
@@ -1651,10 +1664,12 @@ class _DashboardView:
             except Exception:
                 pass
 
-        content.extend([
-            ("", "\n"),
-            ("class:info", f"  Total sessions: {len(self.backend.get_sessions())}\n"),
-        ])
+        content.extend(
+            [
+                ("", "\n"),
+                ("class:info", f"  Total sessions: {len(self.backend.get_sessions())}\n"),
+            ]
+        )
         return content
 
     def get_footer(self):
@@ -1751,47 +1766,3 @@ class _DashboardView:
         )
         app.run()
         return self.exit_to
-
-
-class _ConfigWizard:
-    """Configuration wizard."""
-
-    def __init__(self, backend: "RichBackend"):
-        self.backend = backend
-
-    def run(self) -> bool:
-        from inkarms.config.providers import get_model_choices, get_provider_choices
-
-        # Provider selection
-        provider = self.backend.get_selection(
-            "Setup: Select Provider", get_provider_choices(), "Choose your AI provider"
-        )
-
-        if not provider:
-            return False
-
-        # Model selection
-        model = self.backend.get_selection(
-            "Setup: Select Model", get_model_choices(provider), f"Choose model for {provider}"
-        )
-
-        if not model:
-            return False
-
-        # API Key (skip for ollama)
-        api_key = None
-        if provider != "ollama":
-            api_key = self.backend.get_text_input(
-                f"Setup: {provider.title()} API Key", "API Key: ", password=True
-            )
-            if api_key is None:
-                return False
-
-        # Update status
-        self.backend._status.provider = provider
-        self.backend._status.model = model
-        self.backend._status.api_key_set = bool(api_key and api_key.strip())
-        self.backend._configured = True
-
-        # TODO: Save to actual config file
-        return True

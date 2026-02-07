@@ -5,9 +5,8 @@ Main interface for AI provider access via LiteLLM.
 Handles model resolution, API key management, fallbacks, and response parsing.
 """
 
-import logging
-import os
 import time
+import logging
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any
@@ -102,19 +101,18 @@ class ProviderManager:
             logger.debug(f"Resolved alias '{model}' to '{resolved}'")
             return resolved
 
-        # Return as-is (assumed to be full model name)
+        # Return as-is (assumed to be a full model name)
         return model
 
-    def _extract_provider(self, model: str) -> str:
+    @staticmethod
+    def _extract_provider(model: str) -> str:
         """Extract provider name from model string."""
         if "/" in model:
             return model.split("/")[0]
         return "unknown"
 
-    def _to_litellm_messages(
-        self,
-        messages: list[Message],
-    ) -> list[dict[str, Any]]:
+    @staticmethod
+    def _to_litellm_messages(messages: list[Message]) -> list[dict[str, Any]]:
         """Convert internal messages to LiteLLM format."""
         return [msg.to_dict() for msg in messages]
 
@@ -269,7 +267,6 @@ class ProviderManager:
     async def _handle_failure(
         self,
         error: Exception,
-        messages: list[Message],
         stream: bool,
         original_kwargs: dict[str, Any],
     ) -> CompletionResponse | AsyncIterator[StreamChunk]:
@@ -361,15 +358,7 @@ class ProviderManager:
         self,
         provider: str | None = None,
     ) -> dict[str, ProviderHealth]:
-        """
-        Check health of provider(s).
-
-        Args:
-            provider: Specific provider to check, or None for all configured.
-
-        Returns:
-            Dict mapping provider names to health status.
-        """
+        """Check health of provider(s)."""
         providers_to_check = (
             [provider] if provider else [self.config.default] + list(self.config.fallback)
         )
@@ -388,7 +377,8 @@ class ProviderManager:
 
         return results
 
-    async def _check_single_provider(self, provider: str) -> ProviderHealth:
+    @staticmethod
+    async def _check_single_provider(provider: str) -> ProviderHealth:
         """Check single provider health."""
         start = time.monotonic()
 

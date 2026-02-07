@@ -1,0 +1,46 @@
+steps:
+  welcome:
+    title: "InkArms Setup"
+    message: "Welcome! How would you like to configure InkArms?"
+    options:
+      - value: "quick"
+        label: "Quick Start"
+        description: "Recommended: Sensible defaults"
+      - value: "advanced"
+        label: "Advanced Setup"
+        description: "Customize all options"
+      - value: "skip"
+        label: "Skip Setup"
+        description: "Configure manually later (config files)"
+
+  provider:
+    title: "Select AI Provider"
+    message: "Choose your primary AI provider"
+    # Options will be loaded dynamically from config/providers.py
+
+  model:
+    title: "Select Model"
+    message: "Choose the default model to use"
+
+  api_key:
+    title: "{provider} API Key"
+    message: "Enter API Key (hidden): "
+
+  security:
+    title: "Security Sandbox"
+    message: "How should InkArms handle command execution?"
+    options:
+      - value: "whitelist"
+        label: "Whitelist (Recommended)"
+        description: "Only allow safe commands"
+      - value: "prompt"
+        label: "Prompt Mode"
+        description: "Ask before every command"
+      - value: "disabled"
+        label: "Disabled"
+        description: "Allow all commands (Unsafe)"
+
+  tools:
+    title: "Tool Capabilities"
+    message: "Enable autonomous tool use (File I/O, Shell)?"
+    default: true

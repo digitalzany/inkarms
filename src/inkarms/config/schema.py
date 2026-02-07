@@ -639,11 +639,6 @@ class Config(BaseModel):
     platforms: PlatformsConfig = Field(default_factory=PlatformsConfig)
     general: GeneralConfig = Field(default_factory=GeneralConfig)
 
-    def get_default_model(self) -> str:
-        """Get the default model, resolving aliases if needed."""
-        model = self.providers.default
-        return self.providers.aliases.get(model, model)
-
     def resolve_model_alias(self, model: str) -> str:
         """Resolve a model name or alias to the full model identifier."""
         return self.providers.aliases.get(model, model)

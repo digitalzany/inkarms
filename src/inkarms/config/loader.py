@@ -16,7 +16,7 @@ from typing import Any
 
 import yaml
 
-from inkarms.config.merger import deep_merge, get_nested_value, merge_configs, set_nested_value
+from inkarms.config.merger import deep_merge, get_nested_value, set_nested_value
 from inkarms.config.schema import Config
 from inkarms.storage.paths import (
     find_project_config,

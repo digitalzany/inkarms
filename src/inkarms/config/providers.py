@@ -254,17 +254,18 @@ def get_default_model() -> str:
     if providers:
         first_p = next(iter(providers.values()))
         return f"{first_p.id}/{first_p.default_model}"
+
     return "anthropic/claude-sonnet-4-20250514"
 
 
 def get_provider_choices() -> list[tuple[str, str, str]]:
-    """Get list of providers for selection menus (id, name, description)."""
+    """Get a list of providers for selection menus (id, name, description)."""
     providers = _get_providers()
     return [(p.id, p.name, p.description) for p in providers.values()]
 
 
 def get_model_choices(provider_id: str) -> list[tuple[str, str, str]]:
-    """Get list of models for a provider for selection menus (id, name, description)."""
+    """Get a list of models for a provider for selection menus (id, name, description)."""
     providers = _get_providers()
     if provider_id not in providers:
         return [("default", "Default", "")]
