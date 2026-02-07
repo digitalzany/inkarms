@@ -26,6 +26,12 @@ Most AI tools are just chatboxes. They talk a big game but can't *do* anything. 
 
 > **Philosophy:** InkArms doesn't "chat." It **acts**, **remembers**, and **leaves a paper trail**.
 
+<p align="center">
+  <picture>
+    <img src="./docs/assets/ui.png" alt="InkArms Logo" width="750" />
+  </picture>
+</p>
+
 ## ✨ Why InkArms?
 
 | Feature |       Standard Chatbot 🤖       | InkArms 🐙 |
