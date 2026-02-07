@@ -29,6 +29,7 @@ class UIConfig:
     show_status_bar: bool = True
     show_timestamps: bool = True
     max_messages_display: int = 20
+    max_recent_sessions: int = 10
     enable_mouse: bool = True
     enable_completion: bool = True
 

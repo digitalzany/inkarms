@@ -319,6 +319,7 @@ class UIConfig(BaseModel):
     show_status_bar: bool = True
     show_timestamps: bool = True
     max_messages_display: int = Field(default=20, ge=5, le=100)
+    max_recent_sessions: int = Field(default=10, ge=1, le=50)
     enable_mouse: bool = True
     enable_completion: bool = True
 

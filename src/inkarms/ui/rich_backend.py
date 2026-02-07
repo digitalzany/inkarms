@@ -42,7 +42,10 @@ from rich.panel import Panel
 from rich.text import Text
 
 from inkarms.config.theme import LOGO, STYLE, THEME_STYLES
+from inkarms.memory import get_session_manager
+from inkarms.memory.models import Snapshot
 from inkarms.ui.protocol import ChatMessage, SessionInfo, StatusInfo, UIBackend, UIConfig, UIView
+from inkarms.ui.session_persistence import SessionPersistence
 
 logger = logging.getLogger(__name__)
 
@@ -211,10 +214,11 @@ class RichBackend(UIBackend):
         self._config = ui_config or UIConfig()
         self._status = StatusInfo()
         self._messages: list[ChatMessage] = []
-        self._sessions: dict = {}
         self._current_session: str | None = None
         self._configured = False
         self._streaming_content = ""
+        self._session_dirty = False
+        self._session_persistence: SessionPersistence | None = None
 
         # Will be set during initialization
         self._provider_manager = None
@@ -274,13 +278,34 @@ class RichBackend(UIBackend):
 
             self._skill_manager = get_skill_manager()
 
+            # Initialize session manager for context tracking and persistence
+            if self._configured:
+                try:
+                    self._session_manager = get_session_manager(model=default_model)
+                    self._session_persistence = SessionPersistence(
+                        self._session_manager.storage
+                    )
+                    self._update_status_from_session()
+
+                    # Check for pending handoff
+                    handoff = self._session_manager.check_for_handoff()
+                    if handoff:
+                        logger.info("Pending handoff found - can recover with /load")
+                except Exception as e:
+                    logger.debug(f"Session manager init failed: {e}")
+
         except Exception as e:
             logger.warning(f"Failed to initialize core components: {e}")
             self._configured = False
 
     def cleanup(self) -> None:
         """Cleanup resources."""
-        pass
+        self._persist_current_session()
+        if self._session_manager:
+            try:
+                self._session_manager._auto_save_session()
+            except Exception as e:
+                logger.debug(f"Session save on cleanup failed: {e}")
 
     # --- Main entry point ---
 
@@ -304,10 +329,10 @@ class RichBackend(UIBackend):
                     current_view = self.run_main_menu()
                 elif current_view == UIView.CHAT:
                     if not self._current_session:
-                        if self._sessions:
-                            current_view = UIView.SESSIONS
-                            continue
-                        self.create_session(f"chat-{datetime.now().strftime('%H%M')}")
+                        if not self._try_resume_recent_session():
+                            self.create_session(
+                                SessionPersistence.generate_session_name()
+                            )
                     current_view = self.run_chat()
                 elif current_view == UIView.DASHBOARD:
                     current_view = self.run_dashboard()
@@ -422,37 +447,41 @@ class RichBackend(UIBackend):
     # --- Session management ---
 
     def get_sessions(self) -> list[SessionInfo]:
+        if not self._session_persistence:
+            return []
+        limit = self._config.max_recent_sessions
+        snapshots = self._session_persistence.list_sessions(limit=limit)
         return [
             SessionInfo(
-                name=name,
-                message_count=len(data.get("messages", [])),
-                created=data.get("created", ""),
-                model=data.get("model", ""),
-                is_current=(name == self._current_session),
+                name=s.name,
+                message_count=len(s.session.turns),
+                created=s.created_at.strftime("%Y-%m-%d %H:%M"),
+                model=s.session.metadata.primary_model or "",
+                is_current=(s.name == self._current_session),
             )
-            for name, data in self._sessions.items()
+            for s in snapshots
         ]
 
     def get_current_session(self) -> str | None:
         return self._current_session
 
     def set_current_session(self, name: str) -> None:
-        if name in self._sessions:
-            self._current_session = name
-            self._messages = self._sessions[name].get("messages", [])
-            self._status.session = name
-            self._status.message_count = len(self._messages)
+        self._persist_current_session()
+        self._load_persisted_session(name)
 
     def create_session(self, name: str) -> None:
-        self._sessions[name] = {
-            "messages": [],
-            "created": datetime.now().isoformat(),
-            "model": self._status.model or "unknown",
-        }
+        self._persist_current_session()
+
         self._current_session = name
         self._messages = []
+        self._session_dirty = False
         self._status.session = name
         self._status.message_count = 0
+
+        # Reset session manager for fresh context tracking
+        if self._session_manager:
+            self._session_manager.clear_session()
+            self._update_status_from_session()
 
     def add_message(self, role: str, content: str) -> None:
         """Add message to current session."""
@@ -462,11 +491,42 @@ class RichBackend(UIBackend):
             timestamp=datetime.now().strftime("%H:%M"),
         )
         self._messages.append(msg)
-        if self._current_session and self._current_session in self._sessions:
-            self._sessions[self._current_session]["messages"] = self._messages
+        self._session_dirty = True
         self._status.message_count = len(self._messages)
 
+        # Auto-persist after each assistant response
+        if role == "assistant":
+            self._persist_current_session()
+
     # --- Internal helpers ---
+
+    def _update_status_from_session(self) -> None:
+        """Update status info from session manager."""
+        if not self._session_manager:
+            return
+        try:
+            usage = self._session_manager.get_context_usage()
+            self._status.total_tokens = usage.current_tokens
+            self._status.total_cost = self._session_manager.session.metadata.total_cost
+            self._status.message_count = len(self._session_manager.session.turns)
+        except Exception as e:
+            logger.debug(f"Status update from session failed: {e}")
+
+    def _rebuild_messages_from_session(self) -> None:
+        """Rebuild local message list from session manager turns."""
+        if not self._session_manager:
+            return
+        self._messages = []
+        for turn in self._session_manager.session.turns:
+            self._messages.append(
+                ChatMessage(
+                    role=turn.role,
+                    content=turn.content,
+                    timestamp=turn.timestamp.strftime("%H:%M"),
+                    tokens=turn.token_count,
+                )
+            )
+        self._update_status_from_session()
 
     def _get_status_bar(self):
         """Get status bar formatted text."""
@@ -485,14 +545,59 @@ class RichBackend(UIBackend):
             ("class:status-bar", " "),
         ]
 
+    def _persist_current_session(self) -> None:
+        """Persist current session to snapshot storage if dirty."""
+        if (
+            not self._session_dirty
+            or not self._current_session
+            or not self._session_persistence
+            or not self._session_manager
+        ):
+            return
+        try:
+            snapshot = Snapshot(
+                name=self._current_session,
+                session=self._session_manager.session,
+                tags=["ui-session"],
+            )
+            self._session_persistence.save_session(self._current_session, snapshot)
+            self._session_dirty = False
+        except Exception as e:
+            logger.debug(f"Session persist failed: {e}")
+
+    def _load_persisted_session(self, name: str) -> bool:
+        """Load a persisted session by name. Returns True on success."""
+        if not self._session_persistence or not self._session_manager:
+            return False
+        snapshot = self._session_persistence.load_session(name)
+        if not snapshot:
+            return False
+        self._session_manager._session = snapshot.session
+        self._session_manager.tracker.track_session(snapshot.session)
+        self._current_session = name
+        self._session_dirty = False
+        self._rebuild_messages_from_session()
+        self._status.session = name
+        return True
+
+    def _try_resume_recent_session(self) -> bool:
+        """Try to resume the most recent session from today. Returns True if resumed."""
+        if not self._session_persistence:
+            return False
+        snapshot = self._session_persistence.get_most_recent_today()
+        if snapshot:
+            return self._load_persisted_session(snapshot.name)
+        return False
+
     def _run_sessions_menu(self) -> str:
         """Run sessions selection menu."""
         items = [("new", "New session", "Create a new chat session")]
 
-        for name, data in self._sessions.items():
-            count = len(data.get("messages", []))
-            marker = " (active)" if name == self._current_session else ""
-            items.append((f"load:{name}", f"{name}{marker}", f"{count} messages"))
+        for info in self.get_sessions():
+            marker = " (active)" if info.is_current else ""
+            turns = info.message_count
+            desc = f"{turns} turns | {info.created}"
+            items.append((f"load:{info.name}", f"{info.name}{marker}", desc))
 
         items.append(("menu", "Back", "Return to main menu"))
 
@@ -503,7 +608,9 @@ class RichBackend(UIBackend):
 
         if choice == "new":
             name = self.get_text_input(
-                "New Session", "Name: ", default=f"chat-{datetime.now().strftime('%H%M')}"
+                "New Session",
+                "Name: ",
+                default=SessionPersistence.generate_session_name(),
             )
             if name:
                 self.create_session(name)
@@ -517,40 +624,42 @@ class RichBackend(UIBackend):
         return "menu"
 
     def _build_messages(self, query: str):
-        """Build messages list for the query."""
+        """Build messages list for the query.
+
+        When SessionManager is active, uses full conversation history.
+        Otherwise falls back to single-message mode.
+        """
         from inkarms.providers.models import Message
 
-        messages: list[Message] = []
+        # Use conversation history from session manager (includes the just-added user message)
+        if self._session_manager:
+            messages: list[Message] = []
+            for msg_dict in self._session_manager.get_messages(include_system=True):
+                messages.append(
+                    Message(role=msg_dict["role"], content=msg_dict["content"])
+                )
+            return messages
 
-        # Build system prompt from config and skills
-        system_parts = []
-
-        # # Add personality from config
-        # if self._app_config and self._app_config.system_prompt.personality:
-        #     system_parts.append(self._app_config.system_prompt.personality)
-        #
-        # # Add skill prompts
-        # if self._skill_manager:
-        #     try:
-        #         skills = self._skill_manager.get_skills_for_query(query, max_skills=3)
-        #         if skills:
-        #             skill_parts = ["# Active Skills\n"]
-        #             for skill in skills:
-        #                 skill_parts.append(skill.get_system_prompt_injection())
-        #                 skill_parts.append("\n---\n")
-        #             system_parts.append("\n".join(skill_parts))
-        #     except Exception as e:
-        #         logger.debug(f"Skill loading error: {e}")
-
-        # Add system message if we have content
-        if system_parts:
-            system_prompt = "\n\n".join(system_parts)
-            messages.append(Message.system(system_prompt))
-
-        # Add user message
+        # Fallback: single query without conversation history
+        messages = []
         messages.append(Message.user(query))
-
         return messages
+
+    def _track_response(self, content: str, cost_before: float) -> None:
+        """Track an assistant response in session manager with cost delta."""
+        if not self._session_manager:
+            return
+        try:
+            cost_delta = 0.0
+            if self._provider_manager:
+                cost_after = self._provider_manager.get_cost_summary().total_cost
+                cost_delta = cost_after - cost_before
+            self._session_manager.add_assistant_message(
+                content, model=self._status.model, cost=cost_delta,
+            )
+            self._update_status_from_session()
+        except Exception as e:
+            logger.debug(f"Failed to track assistant message: {e}")
 
     def _process_query_streaming(self, query: str, on_chunk, on_complete, on_error):
         """Process query with streaming, calling callbacks for each chunk."""
@@ -564,7 +673,20 @@ class RichBackend(UIBackend):
             on_complete("Provider not configured")
             return
 
+        # Track user message in session manager (with expanded text for accurate tokens)
+        if self._session_manager:
+            try:
+                self._session_manager.add_user_message(query)
+            except Exception as e:
+                logger.debug(f"Failed to track user message: {e}")
+
         messages = self._build_messages(query)
+
+        # Capture cost before streaming for delta calculation
+        cost_before = 0.0
+        if self._provider_manager:
+            with contextlib.suppress(Exception):
+                cost_before = self._provider_manager.get_cost_summary().total_cost
 
         def run_streaming():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -591,6 +713,7 @@ class RichBackend(UIBackend):
 
             try:
                 result = loop.run_until_complete(stream_response())
+                self._track_response(result, cost_before)
                 on_complete(result)
             except Exception as e:
                 on_error(str(e))
@@ -607,6 +730,13 @@ class RichBackend(UIBackend):
         """Process a user query and get response (non-streaming fallback)."""
         # Expand @file references
         query = self._expand_file_references(query)
+
+        # Track user message in session manager
+        if self._session_manager:
+            try:
+                self._session_manager.add_user_message(query)
+            except Exception as e:
+                logger.debug(f"Failed to track user message: {e}")
 
         # Try to use the provider manager
         if self._provider_manager:
@@ -639,10 +769,22 @@ class RichBackend(UIBackend):
                     future = executor.submit(run_async)
                     response = future.result()
 
-                # Update stats
-                if response.usage:
-                    self._status.total_tokens += response.usage.total_tokens
-                self._status.total_cost += response.cost or 0
+                # Track assistant message in session manager
+                if self._session_manager:
+                    try:
+                        self._session_manager.add_assistant_message(
+                            response.content,
+                            model=response.model,
+                            cost=response.cost or 0,
+                        )
+                        self._update_status_from_session()
+                    except Exception as e:
+                        logger.debug(f"Failed to track assistant message: {e}")
+                else:
+                    # Fallback: update stats directly
+                    if response.usage:
+                        self._status.total_tokens += response.usage.total_tokens
+                    self._status.total_cost += response.cost or 0
 
                 return response.content
 
@@ -695,7 +837,7 @@ class _Menu:
 
         for i, (value, label, desc) in enumerate(self.items):
             if i == self.selected:
-                result.append(("class:menu-selected", f"    ❯ {label}\n"))
+                result.append(("class:menu-selected", f"    ❯ {label}"))
                 if desc:
                     result.append(("class:menu-desc", f"      {desc}\n"))
             else:
@@ -977,7 +1119,8 @@ class _ChatView:
         s = self.backend._status
         if self.streaming:
             return [("class:info", " Streaming response... | Ctrl+C to cancel ")]
-        return [
+
+        status = [
             ("class:status-bar", " "),
             ("class:status-provider", f"{s.provider or '—'}"),
             ("class:status-bar", " | "),
@@ -988,48 +1131,161 @@ class _ChatView:
             ("class:status-tokens", f"{s.total_tokens:,} tok"),
             ("class:status-bar", " | "),
             ("class:status-cost", f"${s.total_cost:.2f}"),
-            ("class:status-bar", " "),
         ]
 
-    def _handle_command(self, text: str):
-        cmd = text.lower().split()[0]
+        # Add context percentage when session manager is active
+        if self.backend._session_manager:
+            try:
+                usage = self.backend._session_manager.get_context_usage()
+                percent = usage.usage_percent * 100
+                ctx_style = "class:warning" if usage.should_compact else "class:status-bar"
+                status.extend([
+                    ("class:status-bar", " | "),
+                    (ctx_style, f"ctx {percent:.0f}%"),
+                ])
+            except Exception:
+                pass
 
-        if cmd in ("/quit", "/q", "/exit"):
-            self.exit_to = None
+        status.append(("class:status-bar", " "))
+        return status
+
+    def _handle_command(self, text: str):
+        parts = text.split(maxsplit=1)
+        cmd = parts[0].lower()
+        arg = parts[1].strip() if len(parts) > 1 else ""
+
+        # Navigation commands that exit the chat view
+        nav_map = {
+            "/quit": None, "/q": None, "/exit": None,
+            "/menu": UIView.MENU, "/m": UIView.MENU,
+            "/dashboard": UIView.DASHBOARD, "/d": UIView.DASHBOARD,
+            "/sessions": UIView.SESSIONS, "/s": UIView.SESSIONS,
+        }
+        if cmd in nav_map:
+            self.exit_to = nav_map[cmd]
             get_app().exit()
             return
-        elif cmd in ("/menu", "/m"):
-            self.exit_to = UIView.MENU
-            get_app().exit()
-            return
-        elif cmd in ("/dashboard", "/d"):
-            self.exit_to = UIView.DASHBOARD
-            get_app().exit()
-            return
-        elif cmd in ("/sessions", "/s"):
-            self.exit_to = UIView.SESSIONS
-            get_app().exit()
-            return
-        elif cmd == "/clear":
-            self.backend._messages = []
-            if self.backend._current_session:
-                self.backend._sessions[self.backend._current_session]["messages"] = []
-            self.backend._status.message_count = 0
-            self.pending_message = "Chat cleared"
+
+        # In-chat commands
+        if cmd == "/clear":
+            self._cmd_clear()
         elif cmd == "/help":
-            self.pending_message = "Commands: /menu /dashboard /sessions /clear /usage /status /quit | Use @file to include file content"
-        elif cmd == "/usage":
-            self.pending_message = f"Tokens: {self.backend._status.total_tokens:,} | Cost: ${self.backend._status.total_cost:.4f}"
-        elif cmd == "/status":
             self.pending_message = (
-                f"Provider: {self.backend._status.provider} | Model: {self.backend._status.model}"
+                "Commands: /menu /dashboard /sessions /clear /usage /status "
+                "/save [name] /load <name> /history /model /quit | Use @file to include file"
             )
+        elif cmd == "/usage":
+            self._cmd_usage()
+        elif cmd == "/status":
+            self._cmd_status()
+        elif cmd == "/save":
+            self._cmd_save(arg)
+        elif cmd == "/load":
+            self._cmd_load(arg)
+        elif cmd == "/history":
+            self._cmd_history()
+        elif cmd == "/model":
+            self._cmd_model(arg)
+        elif cmd == "/chat":
+            pass  # Already in chat
         else:
             self.pending_message = f"Unknown command: {cmd}. Type /help for available commands."
 
         # Refresh display
         if self.app:
             self.app.invalidate()
+
+    def _cmd_clear(self):
+        self.backend._messages = []
+        if self.backend._session_manager:
+            self.backend._session_manager.clear_session()
+        self.backend._session_dirty = True
+        self.backend._status.message_count = 0
+        self.backend._status.total_tokens = 0
+        self.backend._status.total_cost = 0.0
+        self.pending_message = "Chat cleared"
+
+    def _cmd_usage(self):
+        if self.backend._session_manager:
+            usage = self.backend._session_manager.get_context_usage()
+            info = self.backend._session_manager.get_session_info()
+            self.pending_message = (
+                f"Tokens: {usage.current_tokens:,}/{usage.max_tokens:,} "
+                f"({usage.usage_percent * 100:.1f}%) | "
+                f"Cost: ${info['total_cost']:.4f} | "
+                f"Turns: {info['turn_count']}"
+            )
+        else:
+            s = self.backend._status
+            self.pending_message = f"Tokens: {s.total_tokens:,} | Cost: ${s.total_cost:.4f}"
+
+    def _cmd_status(self):
+        status_parts = [
+            f"Provider: {self.backend._status.provider}",
+            f"Model: {self.backend._status.model}",
+        ]
+        if self.backend._session_manager:
+            usage = self.backend._session_manager.get_context_usage()
+            status_parts.append(f"Context: {usage.usage_percent * 100:.1f}%")
+            if usage.should_handoff:
+                status_parts.append("HANDOFF RECOMMENDED")
+            elif usage.should_compact:
+                status_parts.append("Compaction recommended")
+        self.pending_message = " | ".join(status_parts)
+
+    def _cmd_save(self, arg: str):
+        name = arg or f"session-{datetime.now().strftime('%Y%m%d-%H%M')}"
+        if self.backend._session_manager:
+            try:
+                self.backend._session_manager.save_snapshot(name)
+                self.pending_message = f"Session saved as '{name}'"
+            except Exception as e:
+                self.pending_message = f"Save failed: {e}"
+        else:
+            self.pending_message = "Session manager not available"
+
+    def _cmd_load(self, arg: str):
+        if not self.backend._session_manager:
+            self.pending_message = "Session manager not available"
+            return
+
+        if not arg:
+            # List available snapshots
+            entries = self.backend._session_manager.list_memory("snapshot")
+            if entries:
+                names = [e.name for e in entries]
+                self.pending_message = f"Snapshots: {', '.join(names)} | /load <name>"
+            else:
+                self.pending_message = "No snapshots found"
+            return
+
+        session = self.backend._session_manager.load_snapshot(arg)
+        if session:
+            self.backend._rebuild_messages_from_session()
+            self.pending_message = f"Session '{arg}' loaded"
+        else:
+            self.pending_message = f"Snapshot '{arg}' not found"
+
+    def _cmd_history(self):
+        if self.backend._session_manager:
+            turns = self.backend._session_manager.session.turns
+            if turns:
+                count = len(turns)
+                first = turns[0].timestamp.strftime("%H:%M")
+                last = turns[-1].timestamp.strftime("%H:%M")
+                self.pending_message = f"History: {count} turns ({first} - {last})"
+            else:
+                self.pending_message = "No history in current session"
+        else:
+            self.pending_message = f"Messages: {len(self.backend._messages)}"
+
+    def _cmd_model(self, arg: str):
+        if arg and self.backend._session_manager:
+            self.backend._session_manager.set_model(arg)
+            self.backend._status.model = arg
+            self.pending_message = f"Model changed to: {arg}"
+        else:
+            self.pending_message = f"Current model: {self.backend._status.model}"
 
     def run(self) -> UIView | None:
         from prompt_toolkit.widgets import Frame, TextArea
@@ -1272,7 +1528,7 @@ class _ChatView:
         text = buff.text.strip()
         if not text or self.streaming:
             return
-
+        buff.text = ""
         self.pending_message = None
 
         # Handle commands
@@ -1299,6 +1555,24 @@ class _ChatView:
             self.streaming = False
             self.streaming_content = ""
             self.backend.add_message("assistant", full_response)
+
+            # Show context warnings if approaching limits
+            if self.backend._session_manager:
+                try:
+                    usage = self.backend._session_manager.get_context_usage()
+                    if usage.should_handoff:
+                        self.pending_message = (
+                            f"Context at {usage.usage_percent * 100:.0f}% capacity. "
+                            f"Consider /save and starting a new session."
+                        )
+                    elif usage.should_compact:
+                        self.pending_message = (
+                            f"Context at {usage.usage_percent * 100:.0f}% - "
+                            f"compaction recommended"
+                        )
+                except Exception:
+                    pass
+
             self._update_chat_buffer()
             if self.app:
                 self.app.invalidate()
@@ -1326,7 +1600,7 @@ class _DashboardView:
 
     def get_content(self):
         s = self.backend._status
-        return [
+        content = [
             ("class:title", "\n  Dashboard\n"),
             ("", "\n"),
             ("class:info", "  ┌─ Configuration ─────────────────────────────────────\n"),
@@ -1351,9 +1625,37 @@ class _DashboardView:
             ("class:success", f"{s.total_tokens:,}\n"),
             ("class:info", "  │  Est. Cost    "),
             ("class:warning", f"${s.total_cost:.4f}\n"),
-            ("", "\n"),
-            ("class:info", f"  Total sessions: {len(self.backend._sessions)}\n"),
         ]
+
+        # Add context usage from session manager
+        if self.backend._session_manager:
+            try:
+                usage = self.backend._session_manager.get_context_usage()
+                percent = usage.usage_percent * 100
+                ctx_style = "class:warning" if usage.should_compact else "class:success"
+                content.extend([
+                    ("", "\n"),
+                    ("class:info", "  ┌─ Context Window ────────────────────────────────────\n"),
+                    ("class:info", "  │  Usage        "),
+                    (ctx_style, f"{usage.current_tokens:,}/{usage.max_tokens:,} ({percent:.1f}%)\n"),
+                    ("class:info", "  │  Remaining    "),
+                    ("", f"{usage.tokens_remaining:,} tokens\n"),
+                    ("class:info", "  │  Status       "),
+                ])
+                if usage.should_handoff:
+                    content.append(("class:warning", "HANDOFF RECOMMENDED\n"))
+                elif usage.should_compact:
+                    content.append(("class:warning", "Compaction recommended\n"))
+                else:
+                    content.append(("class:success", "OK\n"))
+            except Exception:
+                pass
+
+        content.extend([
+            ("", "\n"),
+            ("class:info", f"  Total sessions: {len(self.backend.get_sessions())}\n"),
+        ])
+        return content
 
     def get_footer(self):
         return [
