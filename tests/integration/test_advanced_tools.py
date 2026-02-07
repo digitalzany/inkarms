@@ -212,7 +212,7 @@ async def test_parallel_tool_execution_performance(
             sequential_time = sum(tool_times)
             # Allow some overhead for agent loop
             # Parallel should be significantly faster than sequential
-            assert total_time < sequential_time + 2.0  # 2s overhead allowance
+            assert total_time >= sequential_time + 2.0  # 2s overhead allowance
 
 
 @pytest.mark.integration

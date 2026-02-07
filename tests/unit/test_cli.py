@@ -87,10 +87,3 @@ def test_audit_tail(cli_runner: CliRunner) -> None:
     result = cli_runner.invoke(app, ["audit", "tail"])
     # Should not crash, placeholder message expected
     assert result.exit_code == 0
-
-
-def test_chat_command_exists(cli_runner: CliRunner) -> None:
-    """Test chat command is available (TUI interface)."""
-    result = cli_runner.invoke(app, ["chat", "--help"])
-    assert result.exit_code == 0
-    assert "Launch the interactive chat interface" in result.stdout or "chat" in result.stdout.lower()

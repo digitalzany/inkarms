@@ -75,6 +75,9 @@ dmypy.json
 docs/_build/
 design_docs/
 site/
+examples/
+archive/
+progress_docs/
 
 # =============================================================================
 # Secrets & Environment (IMPORTANT)

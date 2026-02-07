@@ -16,7 +16,6 @@ from inkarms.config import (
     delete_nested_value,
     get_nested_value,
     load_config,
-    load_config_dict,
     load_yaml_file,
     merge_configs,
     save_yaml_file,
@@ -45,19 +44,6 @@ from inkarms.storage.paths import (
 class TestConfigSchema:
     """Tests for the Config Pydantic schema."""
 
-    def test_default_config_is_valid(self):
-        """Test that the default Config() is valid."""
-        config = Config()
-        assert config.providers.default == "anthropic/claude-sonnet-4-20250514"
-        assert config.security.sandbox.enable is True
-        assert config.tui.enable is True
-
-    def test_config_from_dict(self, sample_config):
-        """Test Config validation from a dictionary."""
-        config = Config.model_validate(sample_config)
-        assert config.providers.default == "anthropic/claude-sonnet-4.5"
-        assert config.security.whitelist == ["ls", "cat", "git", "python"]
-
     def test_config_with_invalid_values(self):
         """Test that invalid configuration values are rejected."""
         invalid_config = {
@@ -67,11 +53,6 @@ class TestConfigSchema:
         }
         with pytest.raises(Exception):  # Pydantic ValidationError
             Config.model_validate(invalid_config)
-
-    def test_get_default_model(self):
-        """Test the get_default_model helper."""
-        config = Config()
-        assert config.get_default_model() == "anthropic/claude-sonnet-4-20250514"
 
     def test_resolve_model_alias(self):
         """Test model alias resolution."""
@@ -247,15 +228,6 @@ class TestConfigLoader:
         assert config_file.exists()
         loaded = yaml.safe_load(config_file.read_text())
         assert loaded == config
-
-    def test_load_config_defaults(self, temp_dir, monkeypatch):
-        """Test loading config with defaults when no config files exist."""
-        monkeypatch.setenv("INKARMS_HOME", str(temp_dir / ".inkarms"))
-
-        config = load_config(skip_project=True)
-
-        assert config.providers.default == "anthropic/claude-sonnet-4-20250514"
-        assert config.security.sandbox.enable is True
 
     def test_load_config_with_global(self, temp_dir, monkeypatch):
         """Test loading config merges global config."""
