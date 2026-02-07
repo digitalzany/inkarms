@@ -8,17 +8,16 @@ It loads defaults from src/inkarms/config/defaults/providers.yaml and
 merges overrides from ~/.inkarms/providers.yaml.
 """
 
-from dataclasses import dataclass
-from pathlib import Path
-
 import yaml
+
+from pathlib import Path
+from pydantic import BaseModel, model_validator
 
 from inkarms.config.merger import deep_merge
 from inkarms.storage.paths import get_inkarms_home
 
 
-@dataclass
-class ModelInfo:
+class ModelInfo(BaseModel):
     """Information about a specific AI model."""
 
     id: str
@@ -31,8 +30,7 @@ class ModelInfo:
     deprecated: bool = False
 
 
-@dataclass
-class ProviderInfo:
+class ProviderInfo(BaseModel):
     """Information about an AI provider."""
 
     id: str
@@ -42,9 +40,16 @@ class ProviderInfo:
     env_var: str | None = None
     setup_instructions: str = ""
     default_model: str | None = None
+    default_context_window: int = 32000
     is_local: bool = False
     api_models_endpoint: str | None = None
     api_models_mapper: str | None = None
+
+    @model_validator(mode="after")
+    def validate_model_context_window(self):
+        for model in self.models:
+            model.context_window = model.context_window or self.default_context_window
+        return self
 
 
 # Cache for providers data

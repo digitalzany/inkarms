@@ -122,16 +122,10 @@ def _map_anthropic_models(data: dict[str, Any]) -> list[ModelInfo]:
         if not model_id:
             continue
 
-        # Heuristics for context window (not provided in API)
-        context = 200000  # Default for modern Claude models
-        if "claude-2" in model_id:
-            context = 100000
-
         models.append(
             ModelInfo(
                 id=model_id,
                 name=item.get("display_name", model_id),
-                context_window=context,
                 description=f"Released {item.get('created_at', '')[:10]}",
             )
         )

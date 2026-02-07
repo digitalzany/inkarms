@@ -47,6 +47,7 @@ def get_ui_backend(
     Raises:
         ImportError: If required dependencies are not installed
     """
+
     config = config or UIConfig()
 
     if backend_type == "textual":
@@ -57,29 +58,13 @@ def get_ui_backend(
         from inkarms.ui.textual_backend import TextualBackend
         return TextualBackend(config)
 
-    if backend_type == "rich":
+    if backend_type in ("rich", "auto"):
         if not _is_rich_available():
             raise ImportError(
                 "Rich or prompt_toolkit is not installed. These are required dependencies."
             )
         from inkarms.ui.rich_backend import RichBackend
         return RichBackend(config)
-
-    # Auto mode: prefer Rich (lighter), fall back to Textual if Rich unavailable
-    if backend_type == "auto":
-        if _is_rich_available():
-            logger.debug("Using Rich+prompt_toolkit UI backend")
-            from inkarms.ui.rich_backend import RichBackend
-            return RichBackend(config)
-
-        if _is_textual_available():
-            logger.debug("Using Textual UI backend")
-            from inkarms.ui.textual_backend import TextualBackend
-            return TextualBackend(config)
-
-        raise ImportError(
-            "No UI backend available. Install prompt_toolkit: pip install prompt_toolkit"
-        )
 
     raise ValueError(f"Unknown backend type: {backend_type}")
 
