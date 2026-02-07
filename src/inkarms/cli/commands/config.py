@@ -585,9 +585,10 @@ def init(
                 results = run_wizard_sync(force=force)
 
                 if results.get("cancelled"):
+                    console.print("[yellow]Setup cancelled by user.[/yellow]")
+                    # add logic
                     return
 
-                # Success handled by wizard
                 return
 
             except KeyboardInterrupt:
@@ -616,16 +617,6 @@ def init(
                 console.print("[dim]  1. Edit ~/.inkarms/config.yaml to configure your settings[/dim]")
                 console.print("[dim]  2. Set your API key: inkarms config set-secret <provider>[/dim]")
                 console.print("[dim]  3. Run: inkarms run 'Hello!'[/dim]")
-        else:
-            # TUI wizard mode (default)
-            from inkarms.tui.app import run_config_wizard
 
-            try:
-                run_config_wizard(force=force)
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Setup cancelled by user.[/yellow]")
-            except Exception as e:
-                console.print(f"\n[red]TUI wizard failed: {e}[/red]")
-                console.print(
-                    "[dim]Try CLI mode with:[/dim] inkarms config init --quick"
-                )
+        else:
+            raise NotImplementedError("Setup wizard not implemented yet.")
