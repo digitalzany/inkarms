@@ -1,10 +1,8 @@
 """
 Entry point for running inkarms as a module.
-
-Usage: python -m inkarms
 """
 
-from inkarms.cli.app import main
+from inkarms.cli.app import app
 
 if __name__ == "__main__":
-    main()
+    app()

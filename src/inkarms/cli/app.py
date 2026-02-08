@@ -4,10 +4,9 @@ Main Typer application for inkarms CLI.
 This module defines the root CLI application and registers all command groups.
 """
 
-from typing import Annotated
-
 import typer
-from rich.console import Console
+
+from typing import Annotated
 
 from inkarms import __version__
 from inkarms.cli.commands import (
@@ -21,6 +20,7 @@ from inkarms.cli.commands import (
     status,
     tools,
 )
+from inkarms.cli.output import print_error, print_warning, print_info
 
 # Create the main Typer app
 app = typer.Typer(
@@ -33,54 +33,15 @@ app = typer.Typer(
     pretty_exceptions_show_locals=False,
 )
 
-# Rich console for output
-console = Console()
-
-
-def _launch_ui(backend: str | None = None) -> None:
-    """Launch the unified UI interface."""
-    try:
-        from inkarms.ui import get_ui_backend
-        from inkarms.ui.protocol import UIConfig
-
-        # Get config from app config if available
-        ui_config = UIConfig()
-        try:
-            from inkarms.config import get_config
-            app_config = get_config()
-            ui_config = UIConfig(
-                theme=app_config.ui.theme,
-                show_status_bar=app_config.ui.show_status_bar,
-                show_timestamps=app_config.ui.show_timestamps,
-                max_messages_display=app_config.ui.max_messages_display,
-                enable_mouse=app_config.ui.enable_mouse,
-                enable_completion=app_config.ui.enable_completion,
-            )
-            if backend is None:
-                backend = app_config.ui.backend
-        except Exception:
-            pass  # Use defaults if config not available
-
-        # Get and run the UI backend
-        backend_type = backend or "auto"
-        ui = get_ui_backend(backend_type=backend_type, config=ui_config)  # type: ignore
-        ui.run()
-
-    except ImportError as e:
-        console.print(f"[red]Error:[/red] Failed to load UI: {e}")
-        console.print("[yellow]Try installing with:[/yellow] pip install inkarms[textual]")
-        raise typer.Exit(1)
-    except KeyboardInterrupt:
-        pass  # Clean exit on Ctrl+C
-
 
 def version_callback(value: bool) -> None:
     """Print version and exit."""
     if value:
-        console.print(f"[bold blue]inkarms[/bold blue] version [green]{__version__}[/green]")
+        print_info(f"inkarms version [green]{__version__}[/green]")
         raise typer.Exit()
 
 
+# noinspection PyUnusedLocal
 @app.callback(invoke_without_command=True)
 def main_callback(
     ctx: typer.Context,
@@ -94,23 +55,7 @@ def main_callback(
             is_eager=True,
         ),
     ] = None,
-    verbose: Annotated[
-        bool,
-        typer.Option(
-            "--verbose",
-            "-v",
-            help="Enable verbose output.",
-        ),
-    ] = False,
-    quiet: Annotated[
-        bool,
-        typer.Option(
-            "--quiet",
-            "-q",
-            help="Minimal output.",
-        ),
-    ] = False,
-    profile: Annotated[
+    config_profile: Annotated[
         str | None,
         typer.Option(
             "--profile",
@@ -159,6 +104,45 @@ app.add_typer(profile.app, name="profile")
 app.add_typer(platforms.app, name="platforms")
 
 
+def _launch_ui(backend: str | None = None) -> None:
+    """Launch the unified UI interface."""
+    try:
+        from inkarms.ui import get_ui_backend
+        from inkarms.ui.protocol import UIConfig
+
+        # Get config from app config if available
+        ui_config = UIConfig()
+        try:
+            from inkarms.config import get_config
+            app_config = get_config()
+            ui_config = UIConfig(
+                theme=app_config.ui.theme,
+                show_status_bar=app_config.ui.show_status_bar,
+                show_timestamps=app_config.ui.show_timestamps,
+                max_messages_display=app_config.ui.max_messages_display,
+                enable_mouse=app_config.ui.enable_mouse,
+                enable_completion=app_config.ui.enable_completion,
+            )
+            if backend is None:
+                backend = app_config.ui.backend
+
+        except Exception:
+            pass  # Use defaults if config not available
+
+        # Get and run the UI backend
+        backend_type = backend or "auto"
+        ui_backend = get_ui_backend(backend_type=backend_type, config=ui_config)  # type: ignore
+        ui_backend.run()
+
+    except ImportError as e:
+        print_error(f"Failed to load UI: {e}")
+        print_warning("Try to reinstall dependencies")
+        raise typer.Exit(1)
+
+    except KeyboardInterrupt:
+        pass  # Clean exit on Ctrl+C
+
+
 @app.command()
 def ui(
     backend: Annotated[
@@ -174,10 +158,5 @@ def ui(
     _launch_ui(backend)
 
 
-def main() -> None:
-    """Entry point for the CLI."""
-    app()
-
-
 if __name__ == "__main__":
-    main()
+    app()
