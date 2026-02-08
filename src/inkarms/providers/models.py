@@ -23,7 +23,7 @@ class Message:
     """Conversation message."""
 
     role: str  # "system" | "user" | "assistant"
-    content: str
+    content: str | list[dict[str, Any]]  # String or structured content blocks (tool results)
     timestamp: datetime | None = None
     name: str | None = None  # Optional sender name
 

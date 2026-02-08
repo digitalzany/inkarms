@@ -66,6 +66,8 @@ class StatusInfo:
     total_tokens: int = 0
     total_cost: float = 0.0
     api_key_set: bool = False
+    tools_enabled: bool = False
+    tools_mode: str = "off"
 
 
 class UIBackend(ABC):

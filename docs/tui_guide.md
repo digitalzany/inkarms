@@ -68,16 +68,19 @@ This opens an interactive configuration wizard with three modes:
 - Cursor indicator shows response is still generating
 - Smooth scrolling to latest message
 
-**Tool Execution:**
-- Real-time indicators when tools are running
-- Shows tool name during execution
-- Indicators disappear when tool completes
+**Tool Execution (Agent Mode):**
+- When tools are enabled, queries go through the agent loop instead of direct streaming
+- Collapsed Rich panels show each tool's name, execution time, and output
+- Real-time status indicator (e.g., "Running execute_bash...") while a tool is active
+- Dangerous tools prompt for approval inline — press `a` to allow, `d` to deny, or `A` to allow all for the session
+- Tool panels use color-coded borders: green for success, red for errors, yellow for denied
 
 **Session Tracking:**
 - Current provider and model displayed in status bar
 - Token usage counter
 - Cost tracking
 - Session name
+- Tools indicator showing count and approval mode (e.g., "Tools: 8 (manual)")
 
 ### Slash Commands
 
@@ -99,6 +102,8 @@ Type `/` in the chat input to access commands (with tab completion):
 | `/load` | Load a session |
 | `/history` | Show conversation history |
 | `/chat` | Return to chat view |
+| `/tools` | Show registered tools and their status |
+| `/agent` | Show/change agent settings (`on`, `off`, `auto`, `manual`, `disabled`) |
 | `/quit` | Exit InkArms |
 
 ### Keyboard Shortcuts
@@ -107,6 +112,9 @@ Type `/` in the chat input to access commands (with tab completion):
 |-----|--------|
 | `Enter` | Send message |
 | `Tab` | Autocomplete slash commands |
+| `a` | Allow a pending tool execution (only shown during approval prompt) |
+| `d` | Deny a pending tool execution (only shown during approval prompt) |
+| `A` | Allow all tools for the rest of the session (only shown during approval prompt) |
 | `Ctrl+C` | Exit |
 
 ## Views

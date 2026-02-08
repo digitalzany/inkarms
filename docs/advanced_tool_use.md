@@ -11,12 +11,13 @@ This guide covers InkArms' advanced tool capabilities including HTTP requests, P
    - [Git Operations Tool](#git-operations-tool)
 3. [Tool Configuration](#tool-configuration)
 4. [Tool Approval Modes](#tool-approval-modes)
-5. [Streaming Events](#streaming-events)
-6. [Parallel Execution](#parallel-execution)
-7. [Tool Metrics](#tool-metrics)
-8. [Examples](#examples)
-9. [Security Considerations](#security-considerations)
-10. [Troubleshooting](#troubleshooting)
+5. [Using Tools in the Interactive UI](#using-tools-in-the-interactive-ui)
+6. [Streaming Events](#streaming-events)
+7. [Parallel Execution](#parallel-execution)
+8. [Tool Metrics](#tool-metrics)
+9. [Examples](#examples)
+10. [Security Considerations](#security-considerations)
+11. [Troubleshooting](#troubleshooting)
 
 ## Overview
 
@@ -292,9 +293,9 @@ agent:
 inkarms run "Make a request to example.com" --tools --tool-approval manual
 ```
 
-**Approval Prompt:**
+**CLI Approval Prompt:**
 ```
-⚠️  Tool Approval Required
+Tool Approval Required
 
 Tool: http_request
 Input: {
@@ -309,6 +310,19 @@ This tool can:
 
 Approve execution? [y/N]:
 ```
+
+**Interactive UI Approval:**
+
+In the chat interface, dangerous tools display an inline approval prompt:
+
+```
+APPROVE TOOL? http_request
+  url: https://example.com, method: GET
+
+  [a] Allow  [d] Deny  [A] Allow All
+```
+
+Press `a` to approve the current tool, `d` to deny it, or `A` to switch to auto-approve mode for the rest of the session.
 
 **Use when:**
 - Running in production environments
@@ -329,6 +343,36 @@ agent:
 # CLI with tools disabled
 inkarms run "What's 2+2?" --tools --tool-approval disabled
 ```
+
+## Using Tools in the Interactive UI
+
+When tools are enabled in your configuration, the chat interface automatically uses the **agent loop** instead of direct streaming. This means the AI can call tools, see their results, and iterate before giving a final response.
+
+### How It Works
+
+1. **Agent mode vs streaming mode**: When tools are enabled and registered, messages go through `AgentLoop`. When tools are disabled, the existing token-by-token streaming mode is preserved unchanged.
+
+2. **Tool panels**: Each tool execution is displayed as a collapsed Rich panel in the chat showing the tool name, execution time, and truncated output. Panels are color-coded: green for success, red for errors, yellow for denied.
+
+3. **Status indicator**: While a tool is running, a status line shows which tool is active (e.g., "Running execute_bash...").
+
+4. **Runtime control**: Use `/agent` to toggle agent settings and `/tools` to list registered tools without restarting the session.
+
+### Slash Commands
+
+| Command | Description |
+|---------|-------------|
+| `/tools` | List all registered tools with safe/dangerous labels |
+| `/agent` | Show current agent settings (mode, max iterations, tool count) |
+| `/agent on` | Enable tools for the session |
+| `/agent off` | Disable tools for the session |
+| `/agent auto` | Set approval mode to auto (all tools run without prompts) |
+| `/agent manual` | Set approval mode to manual (dangerous tools need approval) |
+| `/agent disabled` | Disable all tool execution |
+
+### Trade-offs
+
+Agent mode is **non-streaming** — the AI's full response must be received before tool calls can be detected and executed. When tools are disabled, the existing streaming experience is preserved.
 
 ## Streaming Events
 

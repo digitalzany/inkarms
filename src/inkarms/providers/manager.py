@@ -177,10 +177,10 @@ class ProviderManager:
         except Exception as e:
             # Try fallback chain
             return await self._handle_failure(
-                e,
-                messages,
-                stream,
-                request_kwargs,
+                error=e,
+                # messages,
+                stream=stream,
+                original_kwargs=request_kwargs,
             )
 
     async def _stream_completion(

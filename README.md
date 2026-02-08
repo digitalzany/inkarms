@@ -124,6 +124,7 @@ Unlike standard LLM scripts that forget you instantly, InkArms keeps track of yo
 We believe terminal tools should be pretty.
 *   **Interactive Setup:** `inkarms config init` runs a wizard that guides you through provider selection and security settings.
 *   **Full UI:** `inkarms` launches an interactive terminal app with menu, chat, dashboard, session management, streaming responses, syntax highlighting, and real-time tool execution status. Built with Rich + prompt_toolkit, with a pluggable backend system.
+*   **Tools in Chat:** When tools are enabled, the AI uses them directly in the chat — collapsed panels show tool execution results, and dangerous tools prompt for inline approval (`a`/`d`/`A` keys). Use `/tools` and `/agent` commands to inspect and control tool behavior at runtime.
 
 ### 🔌 Provider Agnostic (LiteLLM)
 Don't get locked into one vendor. InkArms sits on top of [LiteLLM](https://github.com/BerriAI/litellm), giving you instant access to 100+ models.

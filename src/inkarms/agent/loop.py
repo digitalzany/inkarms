@@ -194,6 +194,13 @@ class AgentLoop:
 
                 logger.info(f"AI requested {len(tool_calls)} tool calls")
 
+                # Replace the assistant message with OpenAI tool_calls format
+                # so LiteLLM can pass it correctly on subsequent iterations
+                text_content = self.parser.extract_text_content(response)
+                conversation[-1] = self._build_tool_call_message(
+                    text_content, tool_calls
+                )
+
                 # Execute tool calls
                 tool_results = await self._execute_tool_calls(tool_calls)
 
@@ -229,7 +236,7 @@ class AgentLoop:
             )
 
         except Exception as e:
-            logger.error(f"Agent loop error: {e}", exc_info=True)
+            logger.debug(f"Agent loop error: {e}")
             return AgentResult(
                 success=False,
                 final_response="",
@@ -265,8 +272,20 @@ class AgentLoop:
             ):
                 filtered_tools.append(tool)
 
-        # Return tool definitions
-        return [tool.get_tool_definition() for tool in filtered_tools]
+        # Return tool definitions in OpenAI function calling format
+        # (LiteLLM expects this and translates per-provider)
+        definitions = []
+        for tool in filtered_tools:
+            raw = tool.get_tool_definition()
+            definitions.append({
+                "type": "function",
+                "function": {
+                    "name": raw["name"],
+                    "description": raw.get("description", ""),
+                    "parameters": raw.get("input_schema", {}),
+                },
+            })
+        return definitions
 
     async def _call_ai(
         self,
@@ -284,27 +303,30 @@ class AgentLoop:
         Returns:
             AI response
         """
-        # Convert messages to provider format if needed
-        from inkarms.providers.models import Message
+        # Call LiteLLM directly with raw dict messages to preserve
+        # OpenAI tool fields (tool_calls, tool_call_id) that the Message
+        # class would strip. Use provider manager for model resolution
+        # and response parsing (cost tracking).
+        from litellm import acompletion
 
-        provider_messages = [
-            Message(role=msg["role"], content=str(msg["content"]))
-            for msg in messages
-        ]
+        resolved_model = self.provider_manager._resolve_model(model)
+        # Strip custom provider prefix (e.g. "google/gemini-..." -> "gemini-...")
+        # so LiteLLM can auto-detect the provider from the model name.
+        # Matches the approach in ProviderManager._stream_completion.
+        litellm_model = resolved_model.split("/")[1] if "/" in resolved_model else resolved_model
 
-        # Use provider manager to complete
-        # Note: Tools parameter will be added to ProviderManager in Phase 3
-        # For now, we pass it via kwargs which LiteLLM should handle
-        result = await self.provider_manager.complete(
-            messages=provider_messages,
-            model=model,
-            stream=False,
-            tools=tools if tools else None,
-        )
+        request_kwargs: dict[str, Any] = {
+            "model": litellm_model,
+            "messages": messages,
+            "temperature": 0.7,
+            "stream": False,
+        }
+        if tools:
+            request_kwargs["tools"] = tools
 
-        # Convert response to dict format
-        # The result is a CompletionResponse object
-        return result.model_dump() if hasattr(result, "model_dump") else dict(result)
+        response = await acompletion(**request_kwargs)
+        parsed = self.provider_manager._parse_response(response, resolved_model)
+        return parsed.model_dump()
 
     async def _execute_tool_calls(
         self, tool_calls: list[ToolCall]
@@ -485,7 +507,7 @@ class AgentLoop:
             return result
         except Exception as e:
             execution_time = time.time() - start_time
-            logger.error(f"Tool execution failed: {tool.name}: {e}", exc_info=True)
+            logger.debug(f"Tool execution failed: {tool.name}: {e}")
 
             # Record metrics for exception
             metrics = get_metrics_tracker()
@@ -513,28 +535,47 @@ class AgentLoop:
                 is_error=True,
             )
 
+    @staticmethod
+    def _build_tool_call_message(
+        text_content: str, tool_calls: list[ToolCall]
+    ) -> dict[str, Any]:
+        """Build an assistant message with tool_calls in OpenAI format."""
+        import json
+
+        return {
+            "role": "assistant",
+            "content": text_content or None,
+            "tool_calls": [
+                {
+                    "id": tc.id,
+                    "type": "function",
+                    "function": {
+                        "name": tc.name,
+                        "arguments": (
+                            json.dumps(tc.input)
+                            if isinstance(tc.input, dict)
+                            else str(tc.input)
+                        ),
+                    },
+                }
+                for tc in tool_calls
+            ],
+        }
+
     def _add_tool_results_to_conversation(
         self, conversation: list[dict[str, Any]], tool_results: list[ToolResult]
     ) -> None:
-        """Add tool results to conversation.
+        """Add tool results to conversation in OpenAI format.
 
         Args:
             conversation: Conversation messages (modified in place)
             tool_results: Tool results to add
         """
-        # Add tool results as user message with tool_result content
-        # This is Anthropic's format for tool results
         for result in tool_results:
             conversation.append(
                 {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "tool_result",
-                            "tool_use_id": result.tool_call_id,
-                            "content": result.output if not result.is_error else None,
-                            "is_error": result.is_error,
-                        }
-                    ],
+                    "role": "tool",
+                    "tool_call_id": result.tool_call_id,
+                    "content": result.output if not result.is_error else (result.error or "Error"),
                 }
             )

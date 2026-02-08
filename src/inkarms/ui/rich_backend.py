@@ -21,6 +21,7 @@ from prompt_toolkit import Application
 from prompt_toolkit.application.current import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
+from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import (
@@ -74,6 +75,8 @@ class CommandCompleter(Completer):
         ("/load", "Load session"),
         ("/history", "Show message history"),
         ("/chat", "Go to chat"),
+        ("/tools", "Show registered tools"),
+        ("/agent", "Show/change agent settings"),
     ]
 
     def _fuzzy_match(self, text: str, cmd: str) -> bool:
@@ -226,6 +229,9 @@ class RichBackend(UIBackend):
         self._session_manager = None
         self._skill_manager = None
         self._app_config = None
+        self._tool_registry = None
+        self._sandbox = None
+        self._agent_config = None
 
     # --- Properties ---
 
@@ -279,6 +285,10 @@ class RichBackend(UIBackend):
 
             self._skill_manager = get_skill_manager()
 
+            # Initialize tools and agent config
+            if self._configured:
+                self._init_agent_tools()
+
             # Initialize session manager for context tracking and persistence
             if self._configured:
                 try:
@@ -296,6 +306,35 @@ class RichBackend(UIBackend):
         except Exception as e:
             logger.warning(f"Failed to initialize core components: {e}")
             self._configured = False
+
+    def _init_agent_tools(self) -> None:
+        """Initialize agent config, sandbox, and tool registry."""
+        try:
+            from inkarms.agent.models import AgentConfig as AgentRuntimeConfig
+            from inkarms.agent.models import ApprovalMode
+            from inkarms.security.sandbox import SandboxExecutor
+            from inkarms.tools.builtin.registry_utils import register_builtin_tools
+            from inkarms.tools.registry import get_tool_registry
+
+            agent_schema = self._app_config.agent
+            self._agent_config = AgentRuntimeConfig(
+                approval_mode=ApprovalMode(agent_schema.approval_mode),
+                max_iterations=agent_schema.max_iterations,
+                enable_tools=agent_schema.enable_tools,
+                allowed_tools=agent_schema.allowed_tools,
+                blocked_tools=agent_schema.blocked_tools,
+                timeout_per_iteration=agent_schema.timeout_per_iteration,
+            )
+
+            if self._app_config.is_sandbox_enabled():
+                self._sandbox = SandboxExecutor.from_config(self._app_config.security)
+
+            self._tool_registry = get_tool_registry()
+            if len(self._tool_registry) == 0:
+                register_builtin_tools(self._tool_registry, self._sandbox)
+
+        except Exception as e:
+            logger.debug(f"Agent/tools init failed: {e}")
 
     def cleanup(self) -> None:
         """Cleanup resources."""
@@ -527,7 +566,7 @@ class RichBackend(UIBackend):
 
     def _get_status_bar(self):
         """Get status bar formatted text."""
-        return [
+        items = [
             ("class:status-bar", " "),
             ("class:status-provider", f"{self._status.provider or 'not configured'}"),
             ("class:status-bar", " / "),
@@ -539,8 +578,16 @@ class RichBackend(UIBackend):
             ("class:status-tokens", f"{self._status.total_tokens:,} tok"),
             ("class:status-bar", " │ "),
             ("class:status-cost", f"${self._status.total_cost:.2f}"),
-            ("class:status-bar", " "),
         ]
+        if self._agent_config and self._agent_config.enable_tools:
+            tool_count = len(self._tool_registry) if self._tool_registry else 0
+            mode = self._agent_config.approval_mode.value
+            items.extend([
+                ("class:status-bar", " │ "),
+                ("class:tool-running", f"Tools: {tool_count} ({mode})"),
+            ])
+        items.append(("class:status-bar", " "))
+        return items
 
     def _persist_current_session(self) -> None:
         """Persist current session to snapshot storage if dirty."""
@@ -720,6 +767,75 @@ class RichBackend(UIBackend):
                 loop.close()
 
         thread = threading.Thread(target=run_streaming, daemon=True)
+        thread.start()
+        return thread
+
+    def _process_query_agent(
+        self, query, event_callback, approval_callback, on_complete, on_error
+    ):
+        """Process query through agent loop with tool use."""
+        import contextlib
+        import warnings
+
+        query = self._expand_file_references(query)
+
+        if not self._provider_manager or not self._tool_registry or not self._agent_config:
+            on_error("Agent not configured")
+            return
+
+        if self._session_manager:
+            try:
+                self._session_manager.add_user_message(query)
+            except Exception as e:
+                logger.debug(f"Failed to track user message: {e}")
+
+        messages = self._build_messages(query)
+        msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
+
+        cost_before = 0.0
+        if self._provider_manager:
+            with contextlib.suppress(Exception):
+                cost_before = self._provider_manager.get_cost_summary().total_cost
+
+        def run_agent():
+            warnings.filterwarnings("ignore", category=RuntimeWarning)
+
+            loop = asyncio.new_event_loop()
+            loop.set_exception_handler(lambda lp, ctx: None)
+            asyncio.set_event_loop(loop)
+
+            try:
+                from inkarms.agent.loop import AgentLoop
+
+                agent_loop = AgentLoop(
+                    provider_manager=self._provider_manager,
+                    tool_registry=self._tool_registry,
+                    config=self._agent_config,
+                    approval_callback=approval_callback,
+                    event_callback=event_callback,
+                )
+                result = loop.run_until_complete(
+                    agent_loop.run(msg_dicts, model=self._status.model)
+                )
+                self._track_response(result.final_response, cost_before)
+                on_complete(result)
+            except Exception as e:
+                on_error(str(e))
+            finally:
+                # Cancel pending tasks (LiteLLM logging workers) before closing
+                with contextlib.suppress(Exception):
+                    pending = asyncio.all_tasks(loop)
+                    for task in pending:
+                        task.cancel()
+                    if pending:
+                        loop.run_until_complete(
+                            asyncio.gather(*pending, return_exceptions=True)
+                        )
+                with contextlib.suppress(Exception):
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                loop.close()
+
+        thread = threading.Thread(target=run_agent, daemon=True)
         thread.start()
         return thread
 
@@ -1073,6 +1189,12 @@ class _ChatView:
         self.app: Application | None = None
         self.scroll_offset = 0
         self.total_lines = 0
+        # Agent/tool state
+        self._tool_blocks: list[str] = []
+        self._current_tool_status: str = ""
+        self._approval_event = threading.Event()
+        self._approval_result: bool = False
+        self._pending_approval_info: tuple | None = None
 
     def _get_history_text(self):
         """Format message history for display - same pattern as working demo."""
@@ -1145,6 +1267,20 @@ class _ChatView:
             except Exception:
                 pass
 
+        # Add tools indicator
+        if self.backend._agent_config and self.backend._agent_config.enable_tools:
+            tool_count = len(self.backend._tool_registry) if self.backend._tool_registry else 0
+            mode = self.backend._agent_config.approval_mode.value
+            status.extend([
+                ("class:status-bar", " | "),
+                ("class:tool-running", f"Tools: {tool_count} ({mode})"),
+            ])
+        else:
+            status.extend([
+                ("class:status-bar", " | "),
+                ("class:status-bar", "Tools: off"),
+            ])
+
         status.append(("class:status-bar", " "))
         return status
 
@@ -1178,7 +1314,8 @@ class _ChatView:
         elif cmd == "/help":
             self.pending_message = (
                 "Commands: /menu /dashboard /sessions /clear /usage /status "
-                "/save [name] /load <name> /history /model /quit | Use @file to include file"
+                "/save [name] /load <name> /history /model /tools /agent [mode] /quit "
+                "| Use @file to include file"
             )
         elif cmd == "/usage":
             self._cmd_usage()
@@ -1194,6 +1331,10 @@ class _ChatView:
             self._cmd_model(arg)
         elif cmd == "/chat":
             pass  # Already in chat
+        elif cmd == "/tools":
+            self._cmd_tools()
+        elif cmd == "/agent":
+            self._cmd_agent(arg)
         else:
             self.pending_message = f"Unknown command: {cmd}. Type /help for available commands."
 
@@ -1293,6 +1434,50 @@ class _ChatView:
         else:
             self.pending_message = f"Current model: {self.backend._status.model}"
 
+    def _cmd_tools(self):
+        registry = self.backend._tool_registry
+        if not registry or len(registry) == 0:
+            self.pending_message = "No tools registered"
+            return
+        tools = registry.list_tools()
+        parts = []
+        for tool in tools:
+            label = f"{tool.name} [!]" if tool.is_dangerous else tool.name
+            parts.append(label)
+        mode = "off"
+        if self.backend._agent_config:
+            mode = self.backend._agent_config.approval_mode.value
+        self.pending_message = f"Tools ({mode}): {', '.join(parts)}"
+
+    def _cmd_agent(self, arg: str):
+        config = self.backend._agent_config
+        if not config:
+            self.pending_message = "Agent not configured"
+            return
+        if not arg:
+            mode = config.approval_mode.value
+            enabled = config.enable_tools
+            iters = config.max_iterations
+            self.pending_message = (
+                f"Agent: tools={'on' if enabled else 'off'} mode={mode} "
+                f"max_iterations={iters}"
+            )
+            return
+        from inkarms.agent.models import ApprovalMode
+
+        valid = {m.value for m in ApprovalMode}
+        if arg in valid:
+            config.approval_mode = ApprovalMode(arg)
+            self.pending_message = f"Agent mode changed to: {arg}"
+        elif arg == "on":
+            config.enable_tools = True
+            self.pending_message = "Tools enabled"
+        elif arg == "off":
+            config.enable_tools = False
+            self.pending_message = "Tools disabled"
+        else:
+            self.pending_message = "Usage: /agent [on|off|auto|manual|disabled]"
+
     def run(self) -> UIView | None:
         from prompt_toolkit.widgets import Frame, TextArea
 
@@ -1382,6 +1567,28 @@ class _ChatView:
         def mouse_scroll_down(event):
             scroll_chat_down(3)
 
+        # Tool approval key bindings (only active when approval is pending)
+        approval_pending = Condition(lambda: self._pending_approval_info is not None)
+
+        @kb.add("a", filter=approval_pending)
+        def approve_tool(event):
+            self._approval_result = True
+            self._approval_event.set()
+
+        @kb.add("d", filter=approval_pending)
+        def deny_tool(event):
+            self._approval_result = False
+            self._approval_event.set()
+
+        @kb.add("A", filter=approval_pending)
+        def approve_all_tools(event):
+            from inkarms.agent.models import ApprovalMode
+
+            if self.backend._agent_config:
+                self.backend._agent_config.approval_mode = ApprovalMode.AUTO
+            self._approval_result = True
+            self._approval_event.set()
+
         # Layout
         header = Window(
             content=FormattedTextControl(
@@ -1443,10 +1650,13 @@ class _ChatView:
                         lines.append("")
 
             if self.streaming:
-                # Streaming content
+                # Show tool blocks from agent mode
+                for block in self._tool_blocks:
+                    lines.append(block)
+
+                # Streaming content (standard streaming mode)
                 if self.streaming_content:
                     try:
-                        # Render partially completed content in a panel
                         rendered = _render_markdown_ansi(
                             self.streaming_content + "▌",
                             width=width,
@@ -1458,6 +1668,30 @@ class _ChatView:
                         lines.append(rendered)
                     except Exception:
                         lines.append(self.streaming_content + "▌")
+                elif self._pending_approval_info:
+                    # Show approval prompt
+                    name, args_str, dangerous = self._pending_approval_info
+                    danger_tag = " [DANGEROUS]" if dangerous else ""
+                    lines.append(
+                        _render_styled_text(
+                            f"  Tool requires approval: {name}{danger_tag}",
+                            THEME_STYLES["warning"],
+                        )
+                    )
+                    lines.append(f"  Args: {args_str[:100]}")
+                    lines.append(
+                        _render_styled_text(
+                            "  [a] Allow  [d] Deny  [A] Allow All",
+                            THEME_STYLES["hint"],
+                        )
+                    )
+                elif self._current_tool_status:
+                    lines.append(
+                        _render_styled_text(
+                            f"  {self._current_tool_status}▌",
+                            THEME_STYLES["tool-running"],
+                        )
+                    )
                 else:
                     lines.append(_render_styled_text("Assistant:", THEME_STYLES["assistant"]))
                     lines.append("thinking...▌")
@@ -1547,7 +1781,20 @@ class _ChatView:
         self.backend.add_message("user", text)
         self._update_chat_buffer()
 
-        # Start streaming response
+        # Dispatch: agent mode vs streaming mode
+        tools_enabled = (
+            self.backend._agent_config is not None
+            and self.backend._agent_config.enable_tools
+            and self.backend._tool_registry is not None
+            and len(self.backend._tool_registry) > 0
+        )
+        if tools_enabled:
+            self._start_agent_query(text)
+        else:
+            self._start_streaming_query(text)
+
+    def _start_streaming_query(self, text):
+        """Start a streaming query (no tools)."""
         self.streaming = True
         self.streaming_content = ""
 
@@ -1561,23 +1808,7 @@ class _ChatView:
             self.streaming = False
             self.streaming_content = ""
             self.backend.add_message("assistant", full_response)
-
-            # Show context warnings if approaching limits
-            if self.backend._session_manager:
-                try:
-                    usage = self.backend._session_manager.get_context_usage()
-                    if usage.should_handoff:
-                        self.pending_message = (
-                            f"Context at {usage.usage_percent * 100:.0f}% capacity. "
-                            f"Consider /save and starting a new session."
-                        )
-                    elif usage.should_compact:
-                        self.pending_message = (
-                            f"Context at {usage.usage_percent * 100:.0f}% - compaction recommended"
-                        )
-                except Exception:
-                    pass
-
+            self._show_context_warnings()
             self._update_chat_buffer()
             if self.app:
                 self.app.invalidate()
@@ -1591,6 +1822,150 @@ class _ChatView:
                 self.app.invalidate()
 
         self.backend._process_query_streaming(text, on_chunk, on_complete, on_error)
+
+    def _start_agent_query(self, text):
+        """Start an agent query with tool use."""
+        self.streaming = True
+        self.streaming_content = ""
+        self._tool_blocks = []
+        self._current_tool_status = "Thinking..."
+
+        self.backend._process_query_agent(
+            text,
+            self._handle_agent_event,
+            self._handle_agent_approval,
+            self._handle_agent_complete,
+            self._handle_agent_error,
+        )
+
+    def _handle_agent_event(self, event):
+        """Handle agent loop events (tool start/complete/error)."""
+        from inkarms.agent.models import EventType
+
+        if event.event_type == EventType.TOOL_START:
+            self._current_tool_status = f"Running {event.tool_name}..."
+        elif event.event_type == EventType.TOOL_COMPLETE:
+            data = event.data or {}
+            block = self._render_tool_block(
+                event.tool_name, "success",
+                data.get("execution_time", 0), data.get("output_preview", ""),
+            )
+            self._tool_blocks.append(block)
+            self._current_tool_status = ""
+        elif event.event_type == EventType.TOOL_ERROR:
+            data = event.data or {}
+            error_msg = data.get("error") or data.get("exception") or "Unknown error"
+            block = self._render_tool_block(
+                event.tool_name, "error",
+                data.get("execution_time", 0), error_msg,
+            )
+            self._tool_blocks.append(block)
+            self._current_tool_status = ""
+        elif event.event_type == EventType.TOOL_DENIED:
+            block = self._render_tool_block(
+                event.tool_name, "denied", 0, "Denied by user",
+            )
+            self._tool_blocks.append(block)
+            self._current_tool_status = ""
+        elif event.event_type == EventType.AI_RESPONSE:
+            self._current_tool_status = "Thinking..."
+        self._update_chat_buffer()
+        if self.app:
+            self.app.invalidate()
+
+    def _handle_agent_approval(self, tool_call, tool):
+        """Handle tool approval request (blocks until user responds)."""
+        self._pending_approval_info = (
+            tool.name, str(tool_call.input)[:200], tool.is_dangerous,
+        )
+        self._approval_event.clear()
+        if self.app:
+            self._update_chat_buffer()
+            self.app.invalidate()
+        self._approval_event.wait()
+        self._pending_approval_info = None
+        if self.app:
+            self._update_chat_buffer()
+            self.app.invalidate()
+        return self._approval_result
+
+    def _handle_agent_complete(self, result):
+        """Handle agent loop completion."""
+        self.streaming = False
+        self.streaming_content = ""
+        self._current_tool_status = ""
+        if result.final_response:
+            self.backend.add_message("assistant", result.final_response)
+        elif result.error:
+            # Show first line only — full error is in the tool block
+            short_err = result.error.split("\n")[0][:120] if result.error else "Unknown"
+            self.pending_message = f"Agent error: {short_err}"
+        self._tool_blocks = []
+        self._show_context_warnings()
+        self._update_chat_buffer()
+        if self.app:
+            self.app.invalidate()
+
+    def _handle_agent_error(self, error_str):
+        """Handle agent loop error."""
+        self.streaming = False
+        self.streaming_content = ""
+        self._current_tool_status = ""
+        self._tool_blocks = []
+        # Show first line only to avoid overwhelming the chat
+        short_err = error_str.split("\n")[0][:120] if error_str else "Unknown error"
+        self.pending_message = f"Error: {short_err}"
+        self._update_chat_buffer()
+        if self.app:
+            self.app.invalidate()
+
+    def _show_context_warnings(self):
+        """Show context usage warnings if approaching limits."""
+        if self.backend._session_manager:
+            try:
+                usage = self.backend._session_manager.get_context_usage()
+                if usage.should_handoff:
+                    self.pending_message = (
+                        f"Context at {usage.usage_percent * 100:.0f}% capacity. "
+                        f"Consider /save and starting a new session."
+                    )
+                elif usage.should_compact:
+                    self.pending_message = (
+                        f"Context at {usage.usage_percent * 100:.0f}% - "
+                        f"compaction recommended"
+                    )
+            except Exception:
+                pass
+
+    def _render_tool_block(self, tool_name, status, exec_time, output):
+        """Render a collapsed tool execution block as ANSI text."""
+        try:
+            width = get_app().output.get_size().columns - 4
+        except Exception:
+            width = 100
+
+        if status == "success":
+            icon, border = "[+]", THEME_STYLES["tool-success"]
+        elif status == "error":
+            icon, border = "[!]", THEME_STYLES["tool-error"]
+        else:
+            icon, border = "[x]", THEME_STYLES["tool-denied"]
+
+        title = f"{icon} {tool_name}"
+        if exec_time:
+            title += f" ({exec_time:.1f}s)"
+
+        # Truncate output for display
+        display_output = output[:300] if output else "(no output)"
+        content = f"```\n{display_output}\n```"
+
+        return _render_markdown_ansi(
+            content,
+            width=width,
+            wrap_in_panel=True,
+            panel_title=title,
+            panel_border_style=border,
+        )
 
 
 class _DashboardView:
@@ -1663,6 +2038,22 @@ class _DashboardView:
                     content.append(("class:success", "OK\n"))
             except Exception:
                 pass
+
+        # Tools section
+        if self.backend._agent_config:
+            ac = self.backend._agent_config
+            tool_count = len(self.backend._tool_registry) if self.backend._tool_registry else 0
+            content.extend([
+                ("", "\n"),
+                ("class:info", "  ┌─ Tools & Agent ─────────────────────────────────────\n"),
+                ("class:info", "  │  Tools        "),
+                ("class:success" if ac.enable_tools else "class:warning",
+                 f"{tool_count} registered ({'enabled' if ac.enable_tools else 'disabled'})\n"),
+                ("class:info", "  │  Mode         "),
+                ("", f"{ac.approval_mode.value}\n"),
+                ("class:info", "  │  Max Iters    "),
+                ("", f"{ac.max_iterations}\n"),
+            ])
 
         content.extend(
             [

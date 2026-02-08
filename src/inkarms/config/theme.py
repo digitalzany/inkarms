@@ -33,6 +33,11 @@ THEME_STYLES = {
     "hint": "#a9a9a9",
     "hint-dim": "#666666",
     "frame": "#666666",
+    # Tool blocks
+    "tool-success": "#00ff88",
+    "tool-error": "#ff6b6b",
+    "tool-denied": "#ffaa00",
+    "tool-running": "#00d4ff italic",
     # Completion menu
     "completion-menu": "#ffffff",
     "completion-menu.completion": "#ffffff",
