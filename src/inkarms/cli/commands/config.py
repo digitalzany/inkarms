@@ -567,88 +567,34 @@ def init(
             console.print("[dim]Use --force to overwrite.[/dim]")
 
     else:
-        # Validate --force usage
-        if force and not quick:
+        # Interactive TUI wizard
+        try:
+            from inkarms.ui.rich_backend import RichBackend
+            from inkarms.config.wizard import RichWizard
+
+            # Initialize minimal backend for wizard
+            backend = RichBackend()
+            # We don't need full backend.run(), just enough for the wizard primitives
+
+            wizard = RichWizard(backend)
+            if wizard.run():
+                # Wizard handled success message
+                pass
+
+            else:
+                console.print("[yellow]Setup cancelled.[/yellow]")
+
+        except ImportError:
+            console.print("[red]UI dependencies not found.[/red]")
             console.print(
-                "[red]Error:[/red] --force is only valid with --quick for automation.\n"
-                "[dim]For interactive setup, use:[/dim] inkarms config init\n"
-                "[dim]For scripting, use:[/dim] inkarms config init --quick --force"
-            )
+                "[dim]Install with: pip install inkarms[textual][/dim]"
+            )  # rich is default now but message helps
             raise typer.Exit(1)
 
-        # Decide which mode to use
-        if quick:
-            # CLI inline wizard mode
-            from inkarms.config.legacy_wizard import run_wizard_sync
+        except Exception as e:
+            console.print(f"[red]Wizard failed: {e}[/red]")
+            if os.environ.get("INKARMS_DEBUG"):
+                import traceback
 
-            try:
-                results = run_wizard_sync(force=force)
-
-                if results.get("cancelled"):
-                    console.print("[yellow]Setup cancelled by user.[/yellow]")
-                    # add logic
-                    return
-
-                return
-
-            except KeyboardInterrupt:
-                console.print("\n[yellow]Setup cancelled by user.[/yellow]")
-                return
-            except Exception as e:
-                console.print(f"\n[red]Wizard failed: {e}[/red]")
-                console.print("[dim]Falling back to non-interactive setup...[/dim]\n")
-                # Fall through to non-interactive setup
-                if is_initialized() and not force:
-                    console.print("[yellow]InkArms is already initialized.[/yellow]")
-                    console.print(f"[dim]Config: {get_global_config_path()}[/dim]")
-                    return
-
-                results = run_setup(force=force)
-
-                console.print("[green]InkArms initialized successfully![/green]")
-                console.print("\n[bold]Directories created:[/bold]")
-                for name, path in results["directories"].items():
-                    console.print(f"  {name}: {path}")
-
-                if results["config_created"]:
-                    console.print(f"\n[bold]Configuration:[/bold] {results['config_path']}")
-
-                console.print("\n[dim]Next steps:[/dim]")
-                console.print(
-                    "[dim]  1. Edit ~/.inkarms/config.yaml to configure your settings[/dim]"
-                )
-                console.print(
-                    "[dim]  2. Set your API key: inkarms config set-secret <provider>[/dim]"
-                )
-                console.print("[dim]  3. Run: inkarms run 'Hello!'[/dim]")
-
-        else:
-            # Interactive TUI wizard
-            try:
-                from inkarms.ui.rich_backend import RichBackend
-                from inkarms.config.wizard import RichWizard
-
-                # Initialize minimal backend for wizard
-                backend = RichBackend()
-                # We don't need full backend.run(), just enough for the wizard primitives
-
-                wizard = RichWizard(backend)
-                if wizard.run():
-                    # Wizard handled success message
-                    pass
-                else:
-                    console.print("[yellow]Setup cancelled.[/yellow]")
-
-            except ImportError:
-                console.print("[red]UI dependencies not found.[/red]")
-                console.print(
-                    "[dim]Install with: pip install inkarms[textual][/dim]"
-                )  # rich is default now but message helps
-                raise typer.Exit(1)
-            except Exception as e:
-                console.print(f"[red]Wizard failed: {e}[/red]")
-                if os.environ.get("INKARMS_DEBUG"):
-                    import traceback
-
-                    traceback.print_exc()
-                raise typer.Exit(1)
+                traceback.print_exc()
+            raise typer.Exit(1)
