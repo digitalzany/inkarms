@@ -82,6 +82,7 @@ inkarms config init
 The wizard offers two modes:
 - **QuickStart** (2 minutes) — Essential settings: provider, API key, security, tools
 - **Advanced** (10-15 minutes) — Full configuration with 8 detailed sections
+Or chose **Skip Setup** to skip the wizard and configure manually later
 
 Alternatively, use the CLI inline wizard:
 

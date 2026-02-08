@@ -68,7 +68,14 @@ pip install "inkarms[platforms]"
 ```bash
 # Initialize your config (and secrets)
 inkarms config init
+```
 
+The interactive wizard allows you to:
+- **Quick Start**: Set up with sensible defaults (Provider + API Key).
+- **Advanced Setup**: Configure security, tools, and more detailed options.
+- **Skip**: Skip setup to configure manually via `~/.inkarms/config.yaml`.
+
+```bash
 # Interactive mode (menu, chat, dashboard, sessions - it's pretty)
 inkarms
 

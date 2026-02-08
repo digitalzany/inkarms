@@ -24,9 +24,10 @@ This opens the main menu where you can:
 inkarms config init
 ```
 
-This opens an interactive configuration wizard with two modes:
+This opens an interactive configuration wizard with three modes:
 - **QuickStart** (2 minutes) - Essential settings only
 - **Advanced** (10-15 minutes) - Full configuration
+- **Skip Setup** - Configure manually later
 
 ## Chat Interface
 

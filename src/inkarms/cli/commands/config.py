@@ -579,7 +579,7 @@ def init(
         # Decide which mode to use
         if quick:
             # CLI inline wizard mode
-            from inkarms.config.wizard import run_wizard_sync
+            from inkarms.config.legacy_wizard import run_wizard_sync
 
             try:
                 results = run_wizard_sync(force=force)
@@ -614,9 +614,41 @@ def init(
                     console.print(f"\n[bold]Configuration:[/bold] {results['config_path']}")
 
                 console.print("\n[dim]Next steps:[/dim]")
-                console.print("[dim]  1. Edit ~/.inkarms/config.yaml to configure your settings[/dim]")
-                console.print("[dim]  2. Set your API key: inkarms config set-secret <provider>[/dim]")
+                console.print(
+                    "[dim]  1. Edit ~/.inkarms/config.yaml to configure your settings[/dim]"
+                )
+                console.print(
+                    "[dim]  2. Set your API key: inkarms config set-secret <provider>[/dim]"
+                )
                 console.print("[dim]  3. Run: inkarms run 'Hello!'[/dim]")
 
         else:
-            raise NotImplementedError("Setup wizard not implemented yet.")
+            # Interactive TUI wizard
+            try:
+                from inkarms.ui.rich_backend import RichBackend
+                from inkarms.config.wizard import RichWizard
+
+                # Initialize minimal backend for wizard
+                backend = RichBackend()
+                # We don't need full backend.run(), just enough for the wizard primitives
+
+                wizard = RichWizard(backend)
+                if wizard.run():
+                    # Wizard handled success message
+                    pass
+                else:
+                    console.print("[yellow]Setup cancelled.[/yellow]")
+
+            except ImportError:
+                console.print("[red]UI dependencies not found.[/red]")
+                console.print(
+                    "[dim]Install with: pip install inkarms[textual][/dim]"
+                )  # rich is default now but message helps
+                raise typer.Exit(1)
+            except Exception as e:
+                console.print(f"[red]Wizard failed: {e}[/red]")
+                if os.environ.get("INKARMS_DEBUG"):
+                    import traceback
+
+                    traceback.print_exc()
+                raise typer.Exit(1)
