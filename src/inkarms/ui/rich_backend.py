@@ -10,7 +10,6 @@ from __future__ import annotations
 import traceback
 import asyncio
 import concurrent.futures
-import io
 import logging
 import re
 import threading
@@ -23,7 +22,6 @@ from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.filters import Condition
 from prompt_toolkit.formatted_text import HTML
-from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.layout import (
     BufferControl,
     Float,
@@ -37,10 +35,6 @@ from prompt_toolkit.layout.margins import ScrollbarMargin
 from prompt_toolkit.layout.menus import CompletionsMenu
 from prompt_toolkit.lexers import Lexer
 from prompt_toolkit.widgets import TextArea
-from rich.console import Console
-from rich.markdown import Markdown
-from rich.panel import Panel
-from rich.text import Text
 
 from inkarms.config.theme import LOGO, STYLE, THEME_STYLES
 from inkarms.config.wizard import RichWizard
@@ -48,6 +42,8 @@ from inkarms.memory import get_session_manager
 from inkarms.memory.models import Snapshot
 from inkarms.ui.protocol import ChatMessage, SessionInfo, StatusInfo, UIBackend, UIConfig, UIView
 from inkarms.ui.session_persistence import SessionPersistence
+from inkarms.ui.backends.rich_backend.helpers import render_markdown_ansi, render_styled_text
+from inkarms.ui.backends.rich_backend.key_binding import bind_keys
 
 logger = logging.getLogger(__name__)
 
@@ -109,68 +105,6 @@ class CommandCompleter(Completer):
 
 
 COMMAND_COMPLETER = CommandCompleter()
-
-
-def _render_markdown_to_tuples(text: str, width: int = 100) -> list:
-    """Convert markdown to prompt_toolkit style tuples via Rich ANSI output."""
-    from prompt_toolkit.formatted_text import ANSI, to_formatted_text
-
-    console = Console(
-        file=io.StringIO(),
-        force_terminal=True,
-        width=width,
-        color_system="256",
-        highlight=False,
-    )
-    md = Markdown(text, code_theme="monokai")
-    console.print(md)
-    ansi_output = console.file.getvalue()
-    return list(to_formatted_text(ANSI(ansi_output)))
-
-
-def _render_markdown_ansi(
-    text: str,
-    width: int = 100,
-    style: str = "",
-    wrap_in_panel: bool = False,
-    panel_title: str | None = None,
-    panel_border_style: str = "blue",
-) -> str:
-    """Render markdown to ANSI-formatted string using Rich."""
-    console = Console(
-        file=io.StringIO(),
-        force_terminal=True,
-        width=width,
-        color_system="256",
-        highlight=False,
-    )
-    md = Markdown(text, code_theme="monokai", style=style)
-
-    if wrap_in_panel:
-        renderable = Panel(
-            md,
-            title=panel_title,
-            style=style,  # Panel content style
-            border_style=panel_border_style,
-            expand=False,  # Let it fill width
-            padding=(0, 1),
-        )
-    else:
-        renderable = md
-
-    console.print(renderable)
-    return console.file.getvalue().rstrip()
-
-
-def _render_styled_text(text: str, style_str: str) -> str:
-    """Render text with a specific style to ANSI string."""
-    console = Console(
-        file=io.StringIO(),
-        force_terminal=True,
-        color_system="256",
-    )
-    console.print(Text(text, style=style_str), end="")
-    return console.file.getvalue()
 
 
 class AnsiLexer(Lexer):
@@ -908,7 +842,8 @@ class RichBackend(UIBackend):
         # Fallback: simulated response
         return "I understand. Let me help you with that. (Note: Provider not configured)"
 
-    def _expand_file_references(self, text: str) -> str:
+    @staticmethod
+    def _expand_file_references(text: str) -> str:
         """Expand @path references to file contents."""
         pattern = r"@([^\s]+)"
 
@@ -918,6 +853,7 @@ class RichBackend(UIBackend):
                 try:
                     content = path.read_text()[:2000]
                     return f"\n[File: {m.group(1)}]\n{content}\n[End file]\n"
+
                 except Exception:
                     pass
             return m.group(0)
@@ -931,7 +867,7 @@ class RichBackend(UIBackend):
 
 
 class _Menu:
-    """Simple menu component."""
+    """Simple menu component. Used for popups, categories (e.g., Sessions view)."""
 
     def __init__(self, title: str, items: list[tuple[str, str, str]], subtitle: str = ""):
         self.title = title
@@ -961,49 +897,13 @@ class _Menu:
         return result
 
     def run(self) -> str | None:
-        kb = KeyBindings()
-
-        @kb.add("up")
-        def up(event):
-            self.selected = (self.selected - 1) % len(self.items)
-
-        @kb.add("down")
-        def down(event):
-            self.selected = (self.selected + 1) % len(self.items)
-
-        @kb.add("k")
-        def up_k(event):
-            self.selected = (self.selected - 1) % len(self.items)
-
-        @kb.add("j")
-        def down_j(event):
-            self.selected = (self.selected + 1) % len(self.items)
-
-        @kb.add("enter")
-        def select(event):
-            self.result = self.items[self.selected][0]
-            event.app.exit()
-
-        @kb.add("escape")
-        def cancel(event):
-            self.cancelled = True
-            event.app.exit()
-
-        @kb.add("q")
-        def quit(event):
-            self.cancelled = True
-            event.app.exit()
-
-        @kb.add("c-c")
-        def ctrl_c(event):
-            self.cancelled = True
-            event.app.exit()
-
+        kb = bind_keys(self)
         layout = Layout(Window(FormattedTextControl(self.get_formatted_text)))
         app = Application(
             layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True
         )
         app.run()
+
         return None if self.cancelled else self.result
 
 
@@ -1018,17 +918,7 @@ class _TextInput:
         self.cancelled = False
 
     def run(self) -> str | None:
-        kb = KeyBindings()
-
-        @kb.add("escape")
-        def cancel(event):
-            self.cancelled = True
-            event.app.exit()
-
-        @kb.add("c-c")
-        def ctrl_c(event):
-            self.cancelled = True
-            event.app.exit()
+        kb = bind_keys(self, ["escape", "c-c"])
 
         def _accept_and_exit(buff: Buffer) -> bool:
             get_app().exit()
@@ -1071,7 +961,7 @@ class _TextInput:
 
 
 class _MainMenu:
-    """Main menu with branding."""
+    """Main menu with branding. Used at the startup."""
 
     def __init__(self, backend: "RichBackend"):
         self.backend = backend
@@ -1120,60 +1010,16 @@ class _MainMenu:
         return result
 
     def run(self) -> str:
-        kb = KeyBindings()
-
-        @kb.add("up")
-        def up(event):
-            self.selected = (self.selected - 1) % len(self.items)
-
-        @kb.add("down")
-        def down(event):
-            self.selected = (self.selected + 1) % len(self.items)
-
-        @kb.add("k")
-        def up_k(event):
-            self.selected = (self.selected - 1) % len(self.items)
-
-        @kb.add("j")
-        def down_j(event):
-            self.selected = (self.selected + 1) % len(self.items)
-
-        @kb.add("enter")
-        def select(event):
-            self.result = self.items[self.selected][0]
-            event.app.exit()
-
-        @kb.add("escape")
-        @kb.add("q")
-        def quit(event):
-            self.result = "quit"
-            event.app.exit()
-
-        @kb.add("c-c")
-        def ctrl_c(event):
-            self.result = "quit"
-            event.app.exit()
-
-        @kb.add("c")
-        def chat(event):
-            self.result = "chat"
-            event.app.exit()
-
-        @kb.add("d")
-        def dashboard(event):
-            self.result = "dashboard"
-            event.app.exit()
-
-        @kb.add("s")
-        def sessions(event):
-            self.result = "sessions"
-            event.app.exit()
-
+        kb = bind_keys(
+            self,
+            ["up", "down", "enter", "escape", "c-c", "c", "d", "s"]
+        )
         layout = Layout(Window(FormattedTextControl(self.get_formatted_text)))
         app = Application(
             layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True
         )
         app.run()
+
         return self.result or "quit"
 
 
@@ -1496,18 +1342,7 @@ class _ChatView:
             style="class:user-input",
         )
 
-        kb = KeyBindings()
-
-        @kb.add("c-c")
-        @kb.add("c-q")
-        def exit_(event):
-            self.exit_to = UIView.MENU
-            event.app.exit()
-
-        @kb.add("escape")
-        def escape_(event):
-            self.exit_to = UIView.MENU
-            event.app.exit()
+        kb = bind_keys(self, ["c-c,c-q,escape"])
 
         # Scroll by moving cursor in the buffer (BufferControl native scrolling)
         def scroll_chat_up(lines: int):
@@ -1630,13 +1465,13 @@ class _ChatView:
                     )
                     if msg.role == "user":
                         lines.append(
-                            _render_styled_text(f"{ts}You: {msg.content}", THEME_STYLES["user"])
+                            render_styled_text(f"{ts}You: {msg.content}", THEME_STYLES["user"])
                         )
                         lines.append("")
                     else:
                         # For assistant, we use a Panel and omit the separate header
                         try:
-                            rendered = _render_markdown_ansi(
+                            rendered = render_markdown_ansi(
                                 msg.content,
                                 width=width,
                                 style=THEME_STYLES.get("assistant-text", ""),
@@ -1657,7 +1492,7 @@ class _ChatView:
                 # Streaming content (standard streaming mode)
                 if self.streaming_content:
                     try:
-                        rendered = _render_markdown_ansi(
+                        rendered = render_markdown_ansi(
                             self.streaming_content + "▌",
                             width=width,
                             style=THEME_STYLES.get("assistant-text", ""),
@@ -1673,27 +1508,27 @@ class _ChatView:
                     name, args_str, dangerous = self._pending_approval_info
                     danger_tag = " [DANGEROUS]" if dangerous else ""
                     lines.append(
-                        _render_styled_text(
+                        render_styled_text(
                             f"  Tool requires approval: {name}{danger_tag}",
                             THEME_STYLES["warning"],
                         )
                     )
                     lines.append(f"  Args: {args_str[:100]}")
                     lines.append(
-                        _render_styled_text(
+                        render_styled_text(
                             "  [a] Allow  [d] Deny  [A] Allow All",
                             THEME_STYLES["hint"],
                         )
                     )
                 elif self._current_tool_status:
                     lines.append(
-                        _render_styled_text(
+                        render_styled_text(
                             f"  {self._current_tool_status}▌",
                             THEME_STYLES["tool-running"],
                         )
                     )
                 else:
-                    lines.append(_render_styled_text("Assistant:", THEME_STYLES["assistant"]))
+                    lines.append(render_styled_text("Assistant:", THEME_STYLES["assistant"]))
                     lines.append("thinking...▌")
 
             if self.pending_message:
@@ -1959,7 +1794,7 @@ class _ChatView:
         display_output = output[:300] if output else "(no output)"
         content = f"```\n{display_output}\n```"
 
-        return _render_markdown_ansi(
+        return render_markdown_ansi(
             content,
             width=width,
             wrap_in_panel=True,
@@ -2105,27 +1940,7 @@ class _DashboardView:
 
         input_area.accept_handler = handle
 
-        kb = KeyBindings()
-
-        @kb.add("c-c")
-        def exit_(event):
-            self.exit_to = UIView.MENU
-            event.app.exit()
-
-        @kb.add("tab")
-        def tab(event):
-            buff = event.app.current_buffer
-            if buff.complete_state:
-                buff.complete_next()
-            else:
-                buff.start_completion(select_first=False)
-
-        @kb.add("backspace")
-        def backspace(event):
-            buff = event.app.current_buffer
-            buff.delete_before_cursor(1)
-            if buff.text.startswith("/"):
-                buff.start_completion(select_first=False)
+        kb = bind_keys(self, ["c-c", "tab", "backspace"])
 
         body = HSplit(
             [
