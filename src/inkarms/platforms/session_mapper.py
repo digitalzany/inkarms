@@ -8,7 +8,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-from inkarms.platforms.models import PlatformType, PlatformUser
+from inkarms.models.platforms import PlatformType, PlatformUser
 from inkarms.storage import get_inkarms_home
 
 logger = logging.getLogger(__name__)

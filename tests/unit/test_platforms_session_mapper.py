@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from inkarms.platforms.models import PlatformType, PlatformUser
+from inkarms.models.platforms import PlatformType, PlatformUser
 from inkarms.platforms.session_mapper import (
     SessionMapper,
     SessionMapping,

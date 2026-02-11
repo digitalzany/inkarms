@@ -4,11 +4,14 @@ from inkarms.ui.protocol import UIView
 from prompt_toolkit.key_binding import KeyBindings
 
 if TYPE_CHECKING:
-    from inkarms.ui.rich_backend import _Menu, _MainMenu, _DashboardView, _ChatView, _TextInput
+    from inkarms.ui.backends.rich_backend.backend import _Menu, _MainMenu
+    from inkarms.ui.backends.rich_backend.components.input import TextInput
+    from inkarms.ui.backends.rich_backend.components.chat import ChatView
+    from inkarms.ui.backends.rich_backend.components.dashboard import DashboardView
 
 
 def bind_keys(
-        ui_instance: "_Menu | _MainMenu | _DashboardView | _ChatView | _TextInput",
+        ui_instance: "_Menu | _MainMenu | DashboardView | ChatView | TextInput",
         required_keys: Iterable[str] = ("up", "down", "enter", "escape", "c-c")
 ) -> KeyBindings:
     """
@@ -66,6 +69,16 @@ def bind_keys(
         ui_instance.exit_to = UIView.MENU
         event.app.exit()
 
+    def scroll_top(event):
+        """Suitable for _Chat instance"""
+        if ui_instance.chat_buffer:
+            ui_instance.chat_buffer.cursor_position = 0
+
+    def scroll_bottom(event):
+        """Suitable for _Chat instance"""
+        if ui_instance.chat_buffer:
+            ui_instance.chat_buffer.cursor_position = len(ui_instance.chat_buffer.text)
+
     key_to_action_mapping = {
         "up": up,
         "down": down,
@@ -78,6 +91,8 @@ def bind_keys(
         "tab": tab,
         "backspace": backspace,
         "c-c,c-q,escape": exit_from_chat,
+        "home": scroll_top,
+        "end": scroll_bottom
     }
 
     kb = KeyBindings()

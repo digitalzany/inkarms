@@ -36,7 +36,6 @@ from inkarms.config import (
 from inkarms.config.setup import (
     create_profile,
     create_project_config,
-    is_initialized,
     run_setup,
 )
 from inkarms.storage.paths import (
@@ -569,7 +568,7 @@ def init(
     else:
         # Interactive TUI wizard
         try:
-            from inkarms.ui.rich_backend import RichBackend
+            from inkarms.ui.backends.rich_backend.backend import RichBackend
             from inkarms.config.wizard import RichWizard
 
             # Initialize minimal backend for wizard

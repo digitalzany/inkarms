@@ -5,10 +5,9 @@ Creates and recovers handoff documents for session continuity.
 """
 
 from datetime import datetime
-from typing import Any
 
 from inkarms.memory.context import TokenCounter
-from inkarms.memory.models import (
+from inkarms.models.memory import (
     ConversationTurn,
     HandoffDocument,
     Session,

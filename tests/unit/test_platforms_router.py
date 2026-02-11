@@ -3,9 +3,8 @@
 import asyncio
 import pytest
 from typing import AsyncIterator
-from unittest.mock import AsyncMock, Mock
 
-from inkarms.platforms.models import (
+from inkarms.models.platforms import (
     IncomingMessage,
     OutgoingMessage,
     PlatformCapabilities,

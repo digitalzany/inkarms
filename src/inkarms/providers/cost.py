@@ -7,7 +7,7 @@ Tracks token usage and costs across sessions and models.
 import logging
 from typing import Any
 
-from inkarms.providers.models import (
+from inkarms.models.providers import (
     CostEstimate,
     Message,
     SessionCostSummary,

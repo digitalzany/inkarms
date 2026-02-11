@@ -7,7 +7,7 @@ same MessageProcessor infrastructure as other platforms.
 from collections.abc import AsyncIterator
 from typing import Optional
 
-from inkarms.platforms.models import (
+from inkarms.models.platforms import (
     IncomingMessage,
     OutgoingMessage,
     PlatformCapabilities,

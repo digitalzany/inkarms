@@ -23,7 +23,7 @@ Usage:
 """
 
 # Models
-from inkarms.skills.models import (
+from inkarms.models.skills import (
     FilesystemPermissions,
     Skill,
     SkillFrontmatter,

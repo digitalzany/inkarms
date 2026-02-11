@@ -4,7 +4,6 @@ Session manager for InkArms.
 Provides the main interface for managing sessions, context, and memory.
 """
 
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +11,7 @@ from inkarms.config import get_config
 from inkarms.memory.compaction import CompactionStrategy, get_compactor
 from inkarms.memory.context import ContextTracker
 from inkarms.memory.handoff import HandoffManager
-from inkarms.memory.models import (
+from inkarms.models.memory import (
     ContextUsage,
     ConversationTurn,
     HandoffDocument,
@@ -20,7 +19,6 @@ from inkarms.memory.models import (
     MemoryType,
     Session,
     Snapshot,
-    TurnRole,
 )
 from inkarms.memory.storage import MemoryStorage
 

@@ -6,12 +6,11 @@ Discovers and loads skills from global and project directories.
 
 from pathlib import Path
 
-from inkarms.skills.models import Skill, SkillIndexEntry
+from inkarms.models.skills import Skill, SkillIndexEntry
 from inkarms.skills.parser import (
     SkillParseError,
     SkillValidationError,
     parse_skill_directory,
-    validate_skill_directory,
 )
 from inkarms.storage.paths import get_project_inkarms_dir, get_skills_dir
 

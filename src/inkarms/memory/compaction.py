@@ -9,7 +9,7 @@ from enum import Enum
 from typing import Any
 
 from inkarms.memory.context import TokenCounter
-from inkarms.memory.models import ConversationTurn, Session, TurnRole
+from inkarms.models.memory import ConversationTurn, Session, TurnRole
 
 
 class CompactionStrategy(str, Enum):

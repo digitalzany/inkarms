@@ -4,14 +4,13 @@ HTTP request tool for making web API calls.
 Supports GET, POST, PUT, DELETE methods with authentication, headers, and body.
 """
 
-import asyncio
 import json as json_lib
-from typing import Any, Literal
+from typing import Any
 
 import httpx
 
-from inkarms.tools.base import Tool, ToolExecutionError
-from inkarms.tools.models import ToolParameter, ToolResult
+from inkarms.tools.base import Tool
+from inkarms.models.tools import ToolParameter, ToolResult
 
 
 class HttpRequestTool(Tool):

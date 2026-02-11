@@ -3,7 +3,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 
-from inkarms.tools.models import ToolParameter, ToolResult
+from inkarms.models.tools import ToolParameter, ToolResult
 
 
 class ToolExecutionError(Exception):

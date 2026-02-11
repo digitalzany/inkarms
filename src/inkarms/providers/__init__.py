@@ -29,7 +29,7 @@ from inkarms.providers.manager import (
     clear_provider_manager,
     get_provider_manager,
 )
-from inkarms.providers.models import (
+from inkarms.models.providers import (
     CompletionResponse,
     CostEstimate,
     HealthStatus,

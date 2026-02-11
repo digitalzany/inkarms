@@ -9,7 +9,7 @@ from typing import Any
 import tiktoken
 
 from inkarms.config.providers import ENCODING_MAP, MODEL_CONTEXT_WINDOWS
-from inkarms.memory.models import ContextUsage, ConversationTurn, Session, TurnRole
+from inkarms.models.memory import ContextUsage, ConversationTurn, Session
 
 
 class TokenCounter:

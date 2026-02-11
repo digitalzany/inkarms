@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from inkarms.memory.models import (
+from inkarms.models.memory import (
     ConversationTurn,
     HandoffDocument,
     MemoryEntry,

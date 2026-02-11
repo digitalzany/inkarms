@@ -14,7 +14,7 @@ Key Components:
     - SessionMapper: Maps platform users to session IDs
 """
 
-from inkarms.platforms.models import (
+from inkarms.models.platforms import (
     IncomingMessage,
     OutgoingMessage,
     PlatformCapabilities,

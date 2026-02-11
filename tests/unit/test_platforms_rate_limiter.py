@@ -1,10 +1,9 @@
 """Unit tests for platform rate limiter."""
 
-import asyncio
 import pytest
 import time
 
-from inkarms.platforms.models import PlatformType, PlatformUser
+from inkarms.models.platforms import PlatformType, PlatformUser
 from inkarms.platforms.rate_limiter import (
     RateLimitExceeded,
     RateLimiter,

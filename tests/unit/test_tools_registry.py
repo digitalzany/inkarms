@@ -3,7 +3,7 @@
 import pytest
 
 from inkarms.tools.base import Tool
-from inkarms.tools.models import ToolParameter, ToolResult
+from inkarms.models.tools import ToolParameter, ToolResult
 from inkarms.tools.registry import ToolRegistry, get_tool_registry, reset_tool_registry
 
 

@@ -5,7 +5,7 @@ import logging
 from collections.abc import AsyncIterator
 from typing import Optional
 
-from inkarms.platforms.models import IncomingMessage, OutgoingMessage, StreamChunk
+from inkarms.models.platforms import IncomingMessage, OutgoingMessage, StreamChunk
 from inkarms.platforms.protocol import PlatformAdapter
 
 logger = logging.getLogger(__name__)

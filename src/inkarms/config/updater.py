@@ -12,7 +12,7 @@ from typing import Any
 import httpx
 import yaml
 
-from inkarms.config.providers import PROVIDERS, ModelInfo
+from inkarms.config.providers import PROVIDERS, ModelInfo, ProviderInfo
 from inkarms.secrets import SecretsManager
 from inkarms.storage.paths import get_inkarms_home
 
@@ -34,10 +34,11 @@ async def fetch_and_update_models() -> None:
         provider_ids = list(PROVIDERS.keys())
 
         for provider_id in provider_ids:
-            provider = PROVIDERS[provider_id]
+            provider: ProviderInfo = PROVIDERS[provider_id]
 
-            # Skip if no API endpoint configured
-            if not provider.api_models_endpoint or not provider.api_models_mapper:
+            if provider.is_local:
+                pass
+            elif not provider.api_models_endpoint or not provider.api_models_mapper:
                 continue
 
             # Get API key

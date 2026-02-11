@@ -10,7 +10,7 @@ from git import Repo, GitCommandError, InvalidGitRepositoryError
 from pathlib import Path
 
 from inkarms.tools.base import Tool
-from inkarms.tools.models import ToolParameter, ToolResult
+from inkarms.models.tools import ToolParameter, ToolResult
 
 
 class GitOperationsTool(Tool):

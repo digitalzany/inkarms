@@ -2,7 +2,7 @@
 
 import pytest
 
-from inkarms.agent.models import AgentConfig, ApprovalMode
+from inkarms.models.agent import AgentConfig, ApprovalMode
 
 
 class TestApprovalMode:

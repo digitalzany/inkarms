@@ -9,7 +9,7 @@ This module provides the agent loop that enables iterative tool execution:
 """
 
 from inkarms.agent.loop import AgentLoop, AgentResult
-from inkarms.agent.models import AgentConfig, AgentEvent, ApprovalMode, EventType
+from inkarms.models.agent import AgentConfig, AgentEvent, ApprovalMode, EventType
 from inkarms.agent.parser import ToolCallParser
 
 __all__ = [

@@ -145,10 +145,10 @@ class Skill(BaseModel):
         """
         return f"""## Skill: {self.metadata.name}
 
-{self.metadata.description}
-
-{self.instructions}
-"""
+        {self.metadata.description}
+        
+        {self.instructions}
+        """
 
 
 class SkillIndexEntry(BaseModel):

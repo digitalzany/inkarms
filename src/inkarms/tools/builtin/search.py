@@ -5,8 +5,8 @@ import re
 from pathlib import Path
 from typing import List, Optional
 
-from inkarms.tools.base import Tool, ToolExecutionError
-from inkarms.tools.models import ToolParameter, ToolResult
+from inkarms.tools.base import Tool
+from inkarms.models.tools import ToolParameter, ToolResult
 
 logger = logging.getLogger(__name__)
 

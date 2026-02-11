@@ -63,7 +63,7 @@ def get_ui_backend(
             raise ImportError(
                 "Rich or prompt_toolkit is not installed. These are required dependencies."
             )
-        from inkarms.ui.rich_backend import RichBackend
+        from inkarms.ui.backends.rich_backend.backend import RichBackend
         return RichBackend(config)
 
     raise ValueError(f"Unknown backend type: {backend_type}")

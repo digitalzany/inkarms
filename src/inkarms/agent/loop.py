@@ -5,14 +5,14 @@ import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, AsyncIterator, Callable, Optional
+from typing import Any, Callable, Optional
 
-from inkarms.agent.models import AgentConfig, AgentEvent, ApprovalMode, EventType
+from inkarms.models.agent import AgentConfig, AgentEvent, ApprovalMode, EventType
 from inkarms.agent.parser import ToolCallParser
 from inkarms.providers.manager import ProviderManager
 from inkarms.tools.base import Tool
 from inkarms.tools.metrics import get_metrics_tracker
-from inkarms.tools.models import ToolCall, ToolResult
+from inkarms.models.tools import ToolCall, ToolResult
 from inkarms.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)

@@ -4,14 +4,13 @@ Skill parser for InkArms.
 Parses skill.yaml and SKILL.md files into skill models.
 """
 
-import re
 from pathlib import Path
 from typing import Any
 
 import yaml
 from pydantic import ValidationError
 
-from inkarms.skills.models import (
+from inkarms.models.skills import (
     FilesystemPermissions,
     Skill,
     SkillFrontmatter,

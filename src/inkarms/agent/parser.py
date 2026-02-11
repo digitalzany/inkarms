@@ -3,7 +3,7 @@
 import logging
 from typing import Any
 
-from inkarms.tools.models import ToolCall
+from inkarms.models.tools import ToolCall
 
 logger = logging.getLogger(__name__)
 

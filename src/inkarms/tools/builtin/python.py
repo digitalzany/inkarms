@@ -11,15 +11,13 @@ from typing import Any
 
 from RestrictedPython import compile_restricted_exec, safe_globals, limited_builtins
 from RestrictedPython.Guards import (
-    guarded_iter_unpack_sequence,
-    safe_builtins,
     safer_getattr,
     full_write_guard,
 )
 from RestrictedPython.PrintCollector import PrintCollector
 
 from inkarms.tools.base import Tool
-from inkarms.tools.models import ToolParameter, ToolResult
+from inkarms.models.tools import ToolParameter, ToolResult
 
 
 class PythonEvalTool(Tool):

@@ -1,9 +1,8 @@
 """Unit tests for platform models and protocol."""
 
-import pytest
 from datetime import datetime
 
-from inkarms.platforms.models import (
+from inkarms.models.platforms import (
     IncomingMessage,
     OutgoingMessage,
     PlatformCapabilities,

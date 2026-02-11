@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from typing import Optional
 
-from inkarms.platforms.models import (
+from inkarms.models.platforms import (
     IncomingMessage,
     OutgoingMessage,
     PlatformCapabilities,

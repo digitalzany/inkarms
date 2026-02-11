@@ -27,7 +27,7 @@ Usage:
 """
 
 # Models
-from inkarms.memory.models import (
+from inkarms.models.memory import (
     ContextUsage,
     ConversationTurn,
     HandoffDocument,

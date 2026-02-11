@@ -11,7 +11,7 @@ All tool execution goes through the security sandbox for safety.
 """
 
 from inkarms.tools.base import Tool, ToolExecutionError
-from inkarms.tools.models import ToolCall, ToolParameter, ToolResult
+from inkarms.models.tools import ToolCall, ToolParameter, ToolResult
 from inkarms.tools.registry import ToolRegistry, get_tool_registry
 
 __all__ = [

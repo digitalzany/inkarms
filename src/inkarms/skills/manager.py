@@ -13,21 +13,18 @@ from inkarms.skills.index import (
     load_index,
     rebuild_index,
     remove_from_index,
-    save_index,
     search_skills,
     update_index_entry,
 )
 from inkarms.skills.loader import (
     SkillNotFoundError,
-    discover_all_skills,
     get_global_skills_dir,
     get_project_skills_dir,
     list_installed_skills,
     load_skill,
     load_skill_from_path,
-    skill_exists,
 )
-from inkarms.skills.models import Skill, SkillIndex, SkillIndexEntry
+from inkarms.models.skills import Skill, SkillIndex, SkillIndexEntry
 from inkarms.skills.parser import (
     SkillParseError,
     SkillValidationError,

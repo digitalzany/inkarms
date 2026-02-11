@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from inkarms.memory.models import Snapshot
+    from inkarms.models.memory import Snapshot
     from inkarms.memory.storage import MemoryStorage
 
 logger = logging.getLogger(__name__)

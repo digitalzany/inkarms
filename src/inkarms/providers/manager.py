@@ -24,7 +24,7 @@ from inkarms.providers.exceptions import (
     should_retry,
 )
 from inkarms.providers.fallback import FallbackHandler
-from inkarms.providers.models import (
+from inkarms.models.providers import (
     CompletionResponse,
     HealthStatus,
     Message,

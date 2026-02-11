@@ -12,7 +12,7 @@ from inkarms.skills.loader import (
     discover_all_skills,
     get_global_skills_dir,
 )
-from inkarms.skills.models import SkillIndex, SkillIndexEntry
+from inkarms.models.skills import SkillIndex, SkillIndexEntry
 from inkarms.skills.parser import (
     SkillParseError,
     SkillValidationError,

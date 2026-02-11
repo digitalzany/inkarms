@@ -4,7 +4,6 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from inkarms.tools.builtin.http import HttpRequestTool
-from inkarms.tools.models import ToolResult
 
 
 @pytest.fixture

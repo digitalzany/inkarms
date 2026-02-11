@@ -15,7 +15,7 @@ from inkarms.config.providers import get_provider_choices, get_model_choices
 from inkarms.secrets.manager import DecryptionError
 
 if TYPE_CHECKING:
-    from inkarms.ui.rich_backend import RichBackend
+    from inkarms.ui.backends.rich_backend.backend import RichBackend
 
 
 class RichWizard:

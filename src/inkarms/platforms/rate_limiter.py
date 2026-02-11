@@ -6,7 +6,7 @@ import time
 from collections import defaultdict
 from typing import Optional
 
-from inkarms.platforms.models import PlatformType, PlatformUser
+from inkarms.models.platforms import PlatformType, PlatformUser
 
 logger = logging.getLogger(__name__)
 

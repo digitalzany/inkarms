@@ -12,7 +12,7 @@ from inkarms.agent import AgentConfig, AgentEvent, AgentLoop, ApprovalMode
 from inkarms.audit import get_audit_logger
 from inkarms.config import get_config
 from inkarms.memory import get_session_manager
-from inkarms.platforms.models import PlatformType, StreamChunk
+from inkarms.models.platforms import PlatformType, StreamChunk
 from inkarms.providers import (
     AllProvidersFailedError,
     AuthenticationError,

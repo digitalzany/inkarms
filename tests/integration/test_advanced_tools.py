@@ -5,9 +5,7 @@ Tests tool combinations, streaming events, parallel execution,
 metrics tracking, and platform processor integration.
 """
 
-import asyncio
 import time
-from pathlib import Path
 from typing import List
 from unittest.mock import MagicMock
 
@@ -16,7 +14,7 @@ import pytest
 from inkarms.agent import AgentConfig, AgentEvent, AgentLoop, ApprovalMode, EventType
 from inkarms.config import Config
 from inkarms.config.schema import AgentConfigSchema, SecurityConfig
-from inkarms.platforms.models import PlatformType
+from inkarms.models.platforms import PlatformType
 from inkarms.platforms.processor import MessageProcessor
 from inkarms.providers import get_provider_manager
 from inkarms.security.sandbox import SandboxExecutor

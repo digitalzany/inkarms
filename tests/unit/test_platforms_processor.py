@@ -3,7 +3,7 @@
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
-from inkarms.platforms.models import PlatformType, StreamChunk
+from inkarms.models.platforms import PlatformType
 from inkarms.platforms.processor import MessageProcessor, ProcessedResponse
 from inkarms.providers import (
     AuthenticationError,
