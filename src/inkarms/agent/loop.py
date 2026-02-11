@@ -310,13 +310,9 @@ class AgentLoop:
         from litellm import acompletion
 
         resolved_model = self.provider_manager._resolve_model(model)
-        # Strip custom provider prefix (e.g. "google/gemini-..." -> "gemini-...")
-        # so LiteLLM can auto-detect the provider from the model name.
-        # Matches the approach in ProviderManager._stream_completion.
-        litellm_model = resolved_model.split("/")[1] if "/" in resolved_model else resolved_model
 
         request_kwargs: dict[str, Any] = {
-            "model": litellm_model,
+            "model": resolved_model,
             "messages": messages,
             "temperature": 0.7,
             "stream": False,

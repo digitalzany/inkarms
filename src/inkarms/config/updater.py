@@ -1,16 +1,18 @@
 """
 Configuration updater for InkArms.
 
-Fetches model lists from provider APIs and updates the local configuration.
+Fetches model lists from different providers and updates the local configuration.
 """
 
-import logging
 import os
+import time
+import logging
 from datetime import datetime
 from typing import Any
 
-import httpx
 import yaml
+import httpx
+import ollama
 
 from inkarms.config.providers import PROVIDERS, ModelInfo, ProviderInfo
 from inkarms.secrets import SecretsManager
@@ -37,7 +39,10 @@ async def fetch_and_update_models() -> None:
             provider: ProviderInfo = PROVIDERS[provider_id]
 
             if provider.is_local:
-                pass
+                local_models = _fetch_local_provider_models(provider.api_models_mapper or provider_id)
+                updated_models[provider_id] = local_models
+                continue
+
             elif not provider.api_models_endpoint or not provider.api_models_mapper:
                 continue
 
@@ -45,6 +50,7 @@ async def fetch_and_update_models() -> None:
             api_key = _get_api_key(provider.env_var)
             if not api_key:
                 continue
+
             try:
                 # Fetch models
                 fetched_models = await _fetch_provider_models(
@@ -58,12 +64,14 @@ async def fetch_and_update_models() -> None:
                 if new_models:
                     updated_models[provider_id] = new_models
                     logger.info(f"Found {len(new_models)} new models for {provider_id}")
+
             except Exception as e:
                 logger.debug(f"Failed to fetch models for {provider_id}: {e}")
 
         # If we found any new models, update configuration
         if updated_models:
             _update_user_config(updated_models)
+
     except Exception as e:
         logger.debug(f"Model update process failed: {e}")
 
@@ -84,9 +92,33 @@ def _get_api_key(env_var: str | None) -> str | None:
         # Map env var to secret key (e.g. ANTHROPIC_API_KEY -> anthropic_api_key)
         secret_key = env_var.lower()
         return secrets.get(secret_key)
+
     except Exception:
         return None
 
+
+def _fetch_local_provider_models(mapper: str) -> list[ModelInfo]:
+    """Fetch and map models from a local provider"""
+    if mapper == "ollama":
+        return _map_ollama_models()
+
+    return []
+
+def _map_ollama_models():
+    """Map Ollama response to ModelInfo objects."""
+    models = []
+    ollama_models = ollama.list().get('models', [])
+
+    models.extend([
+        ModelInfo(
+            id=model.get('model', "ollama-model"),
+            name=model.get('model', f"unknown-ollama-model-{time.time_ns()}"),
+            description=f"Released/modified at {model.get('modified_at', '')}",
+        )
+        for model in ollama_models
+    ])
+
+    return models
 
 async def _fetch_provider_models(endpoint: str, mapper: str, api_key: str) -> list[ModelInfo]:
     """Fetch and map models from a specific provider."""
@@ -101,7 +133,7 @@ async def _fetch_provider_models(endpoint: str, mapper: str, api_key: str) -> li
             response.raise_for_status()
             return _map_anthropic_models(response.json())
 
-        elif mapper == "google":
+        elif mapper == "gemini":
             # Google uses query param for key
             params = {"key": api_key}
             response = await client.get(endpoint, params=params)
@@ -179,6 +211,7 @@ def _update_user_config(new_models_map: dict[str, list[ModelInfo]]) -> None:
         try:
             with open(config_path, encoding="utf-8") as f:
                 user_config = yaml.safe_load(f) or {}
+
         except Exception:
             # If invalid, start fresh or abort? Safest to abort to not lose user data
             logger.warning("Could not read providers.yaml, skipping update")

@@ -86,11 +86,12 @@ class ChatView:
         if self.streaming:
             return [("class:info", " Streaming response... | Ctrl+C to cancel ")]
 
+        model = s.model.split("/")[1] if "/" in s.model else s.model
         status = [
             ("class:status-bar", " "),
             ("class:status-provider", f"{s.provider or '—'}"),
             ("class:status-bar", " | "),
-            ("class:status-model", f"{s.model or '—'}"),
+            ("class:status-model", f"{model or '—'}"),
             ("class:status-bar", " | "),
             ("class:status-session", f"{s.session or '—'}"),
             ("class:status-bar", f" ({s.message_count}) | "),

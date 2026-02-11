@@ -96,60 +96,29 @@ providers:
         description: "Latest reasoning model"
         context_window: 128000
 
-  google:
-    id: "google"
+  gemini:
+    id: "gemini"
     name: "Google Gemini"
-    description: "Gemini Pro & Flash models"
+    description: "Gemini Pro & Flash models from Google Gen AI Studio / Cloud / Vertex"
+    meta_info: "LiteLLM resolves gemini/<model_name> instead of google/<model_name>. Please keep provider name and id = gemini"
     env_var: "GOOGLE_API_KEY"
-    default_model: "gemini-2.5-pro"
+    default_model: "gemini-flash-lite-latest"
     default_context_window: 1048576
     api_models_endpoint: "https://generativelanguage.googleapis.com/v1beta/models"
-    api_models_mapper: "google"
+    api_models_mapper: "gemini"
     models:
-      - id: "gemini-2.5-pro"
-        name: "Gemini 2.5 Pro"
-        description: "Best capability"
-        context_window: 1048576
-        recommended: true
-      - id: "gemini-2.5-flash"
-        name: "Gemini 2.5 Flash"
-        description: "Fast and efficient"
-        context_window: 1048576
-      - id: "gemini-3-pro"
-        name: "Gemini 3 Pro"
+      - id: "gemini-pro-latest"
+        name: "Gemini Pro Latest"
         description: "Next-gen preview"
         context_window: 1048576
-      - id: "gemini-3-flash"
-        name: "Gemini 3 Flash"
+      - id: "gemini-flash-latest"
+        name: "Gemini Flash Latest"
         description: "Next-gen fast preview"
         context_window: 1048576
-      - id: "gemini-2.5-flash-lite"
-        name: "Gemini 2.5 Flash-Lite"
-        description: "Cost effective"
+      - id: "gemini-flash-lite-latest"
+        name: "Gemini Flash Lite Latest"
+        description: "Next-gen fast preview"
         context_window: 1048576
-      - id: "gemini-2.0-flash"
-        name: "Gemini 2.0 Flash"
-        description: "Previous generation fast"
-        context_window: 1048576
-      - id: "gemini-2.0-flash-lite"
-        name: "Gemini 2.0 Flash-Lite"
-        description: "Previous generation efficient"
-        context_window: 1048576
-      - id: "gemini-1.5-pro"
-        name: "Gemini 1.5 Pro"
-        description: "Legacy large context"
-        context_window: 2097152
-        deprecated: true
-      - id: "gemini-1.5-flash"
-        name: "Gemini 1.5 Flash"
-        description: "Legacy fast"
-        context_window: 1048576
-        deprecated: true
-      - id: "gemini-pro"
-        name: "Gemini Pro 1.0"
-        description: "Discontinued"
-        context_window: 32000
-        deprecated: true
 
   github_copilot:
     id: "github_copilot"
@@ -186,23 +155,7 @@ providers:
     name: "Ollama"
     description: "Local models, no API key needed"
     is_local: true
-    default_model: "llama3.3"
+    default_model: ""
     default_context_window: 32000
-    models:
-      - id: "llama3.3"
-        name: "Llama 3.3"
-        description: "Latest state of the art open model"
-        context_window: 128000
-        recommended: true
-      - id: "llama3.2"
-        name: "Llama 3.2"
-        description: "Efficient open model"
-        context_window: 128000
-      - id: "mistral"
-        name: "Mistral"
-        description: "Fast and efficient"
-        context_window: 32000
-      - id: "codellama"
-        name: "Code Llama"
-        description: "Specialized for code"
-        context_window: 16384
+    api_models_mapper: "ollama"
+    models: []

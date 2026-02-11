@@ -55,7 +55,7 @@ def get_ui_backend(
             raise ImportError(
                 "Textual is not installed. Install with: pip install inkarms[textual]"
             )
-        from inkarms.ui.textual_backend import TextualBackend
+        from inkarms.ui.backends.textual_backend.backend import TextualBackend
         return TextualBackend(config)
 
     if backend_type in ("rich", "auto"):
