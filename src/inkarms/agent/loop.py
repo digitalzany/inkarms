@@ -50,6 +50,7 @@ class AgentLoop:
         config: AgentConfig | None = None,
         approval_callback: Callable[[ToolCall, Tool], bool] | None = None,
         event_callback: Callable[[AgentEvent], None] | None = None,
+        stream_callback: Callable[[str], None] | None = None,
     ):
         """Initialize agent loop.
 
@@ -61,12 +62,15 @@ class AgentLoop:
                                Takes (ToolCall, Tool) and returns bool (approved)
             event_callback: Optional callback for streaming events
                             Takes (AgentEvent) for real-time updates
+            stream_callback: Optional callback for streaming text tokens
+                             Takes (str) for each text chunk as it arrives
         """
         self.provider_manager = provider_manager
         self.tool_registry = tool_registry
         self.config = config or AgentConfig()
         self.approval_callback = approval_callback
         self.event_callback = event_callback
+        self.stream_callback = stream_callback
 
     def _emit_event(self, event: AgentEvent) -> None:
         """Emit an event if callback is configured.
@@ -342,18 +346,52 @@ class AgentLoop:
         from litellm import acompletion
 
         resolved_model = self.provider_manager.resolve_model(model)
+        use_streaming = self.stream_callback is not None
 
         request_kwargs: dict[str, Any] = {
             "model": resolved_model,
             "messages": messages,
             "temperature": 0.7,
-            "stream": False,
+            "stream": use_streaming,
         }
         if tools:
             request_kwargs["tools"] = tools
 
         response = await acompletion(**request_kwargs)
-        parsed = self.provider_manager.parse_response(response, resolved_model)
+
+        if not use_streaming:
+            parsed = self.provider_manager.parse_response(response, resolved_model)
+            return parsed.model_dump()
+
+        return await self._handle_streaming_response(
+            response, messages, resolved_model,
+        )
+
+    async def _handle_streaming_response(
+        self,
+        response: Any,
+        messages: list[dict[str, Any]],
+        resolved_model: str,
+    ) -> dict[str, Any]:
+        """Consume a streaming response, emitting text chunks via callback.
+
+        Collects all chunks then reconstructs the full response for parsing.
+        """
+        from litellm import stream_chunk_builder
+
+        chunks: list[Any] = []
+        has_tool_calls = False
+        async for chunk in response:
+            chunks.append(chunk)
+            if chunk.choices:
+                delta = chunk.choices[0].delta
+                if delta.content and not has_tool_calls:
+                    self.stream_callback(delta.content)
+                if hasattr(delta, "tool_calls") and delta.tool_calls:
+                    has_tool_calls = True
+
+        full_response = stream_chunk_builder(chunks, messages=messages)
+        parsed = self.provider_manager.parse_response(full_response, resolved_model)
         return parsed.model_dump()
 
     async def _execute_tool_calls(

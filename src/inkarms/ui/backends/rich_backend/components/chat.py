@@ -451,12 +451,19 @@ class ChatView:
         self._tool_blocks = []
         self._current_tool_status = "Thinking..."
 
+        def on_chunk(chunk):
+            self.streaming_content += chunk
+            self._update_chat_buffer()
+            if self.app:
+                self.app.invalidate()
+
         self.backend.process_query_agent(
             text,
             self._handle_agent_event,
             self._handle_agent_approval,
             self._handle_agent_complete,
             self._handle_agent_error,
+            on_chunk=on_chunk,
         )
 
     def _handle_agent_event(self, event):
@@ -464,6 +471,7 @@ class ChatView:
         from inkarms.models.agent import EventType
 
         if event.event_type == EventType.TOOL_START:
+            self.streaming_content = ""  # Clear streamed text so tool UI shows
             self._current_tool_status = f"Running {event.tool_name}..."
         elif event.event_type == EventType.TOOL_COMPLETE:
             data = event.data or {}

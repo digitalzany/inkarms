@@ -536,11 +536,13 @@ class RichBackend(UIBackend):
         )
 
     def process_query_agent(
-        self, query, event_callback, approval_callback, on_complete, on_error
+        self, query, event_callback, approval_callback, on_complete, on_error,
+        *, on_chunk=None,
     ):
         """Process query through agent loop with tool use."""
         return self._get_query_processor().process_agent(
-            query, event_callback, approval_callback, on_complete, on_error
+            query, event_callback, approval_callback, on_complete, on_error,
+            on_chunk=on_chunk,
         )
 
 

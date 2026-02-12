@@ -98,6 +98,8 @@ class QueryProcessor:
         approval_callback: Callable,
         on_complete: Callable,
         on_error: Callable[[str], None],
+        *,
+        on_chunk: Callable[[str], None] | None = None,
     ) -> threading.Thread:
         """Process query through agent loop with tool use."""
         query = expand_file_references(query)
@@ -120,6 +122,7 @@ class QueryProcessor:
                 config=self._agent_config,
                 approval_callback=approval_callback,
                 event_callback=event_callback,
+                stream_callback=on_chunk,
             )
             return await agent_loop.run(msg_dicts, model=self._status.model)
 
