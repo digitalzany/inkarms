@@ -33,7 +33,7 @@ from inkarms.ui.backends.rich_backend.components.chat import ChatView
 from inkarms.ui.backends.rich_backend.components.dashboard import DashboardView
 from inkarms.ui.backends.rich_backend.components.input import TextInput
 from inkarms.ui.protocol import ChatMessage, SessionInfo, StatusInfo, UIBackend, UIConfig, UIView
-from inkarms.ui.session_persistence import SessionPersistence
+from inkarms.memory.session_persistence import SessionPersistence
 from inkarms.ui.backends.rich_backend.key_binding import bind_keys
 
 logger = logging.getLogger(__name__)
