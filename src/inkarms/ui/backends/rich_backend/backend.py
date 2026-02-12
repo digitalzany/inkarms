@@ -7,123 +7,22 @@ and prompt_toolkit for full-screen applications and input handling.
 
 from __future__ import annotations
 
-import traceback
-import asyncio
-import concurrent.futures
 import logging
-import re
 import threading
 from datetime import datetime
-from pathlib import Path
 
-from prompt_toolkit import Application
-from prompt_toolkit.completion import Completer, Completion
-from prompt_toolkit.layout import (
-    FormattedTextControl,
-    Layout,
-    Window,
-)
-from prompt_toolkit.lexers import Lexer
-
-from inkarms.config.theme import LOGO, STYLE
 from inkarms.config.wizard import RichWizard
 from inkarms.memory import get_session_manager
+from inkarms.memory.session_persistence import SessionPersistence
 from inkarms.models.memory import Snapshot
 from inkarms.ui.backends.rich_backend.components.chat import ChatView
 from inkarms.ui.backends.rich_backend.components.dashboard import DashboardView
 from inkarms.ui.backends.rich_backend.components.input import TextInput
+from inkarms.ui.backends.rich_backend.components.menu import MainMenu, Menu
 from inkarms.ui.protocol import ChatMessage, SessionInfo, StatusInfo, UIBackend, UIConfig, UIView
-from inkarms.memory.session_persistence import SessionPersistence
-from inkarms.ui.backends.rich_backend.key_binding import bind_keys
 
 logger = logging.getLogger(__name__)
 
-
-class CommandCompleter(Completer):
-    """Completer for slash commands with fuzzy matching."""
-
-    COMMANDS = [
-        ("/help", "Show available commands"),
-        ("/menu", "Return to main menu"),
-        ("/dashboard", "Show dashboard"),
-        ("/sessions", "Manage sessions"),
-        ("/config", "Open configuration"),
-        ("/clear", "Clear current session"),
-        ("/usage", "Show token usage"),
-        ("/status", "Show current status"),
-        ("/model", "Show/change model"),
-        ("/quit", "Exit InkArms"),
-        ("/save", "Save session"),
-        ("/load", "Load session"),
-        ("/history", "Show message history"),
-        ("/chat", "Go to chat"),
-        ("/tools", "Show registered tools"),
-        ("/agent", "Show/change agent settings"),
-    ]
-
-    def _fuzzy_match(self, text: str, cmd: str) -> bool:
-        if cmd.startswith(text):
-            return True
-        text_lower = text.lower()
-        cmd_lower = cmd.lower()
-        t_idx = 0
-        for c in cmd_lower:
-            if t_idx < len(text_lower) and c == text_lower[t_idx]:
-                t_idx += 1
-        return t_idx == len(text_lower)
-
-    def _match_score(self, text: str, cmd: str) -> int:
-        return 0 if cmd.startswith(text) else 1
-
-    def get_completions(self, document, complete_event):
-        text = document.text_before_cursor.strip()
-        if not text.startswith("/"):
-            return
-
-        matches = []
-        for cmd, desc in self.COMMANDS:
-            if self._fuzzy_match(text, cmd):
-                matches.append((self._match_score(text, cmd), cmd, desc))
-
-        matches.sort(key=lambda x: (x[0], x[1]))
-        for score, cmd, desc in matches:
-            yield Completion(cmd, start_position=-len(text), display=cmd, display_meta=desc)
-
-
-COMMAND_COMPLETER = CommandCompleter()
-
-
-class AnsiLexer(Lexer):
-    """Lexer that interprets ANSI escape codes and returns styled fragments."""
-
-    def lex_document(self, document):
-        """Return a function that returns styled fragments for a line."""
-        from prompt_toolkit.formatted_text import ANSI, to_formatted_text
-
-        lines = document.lines
-
-        def get_line(lineno):
-            if lineno < len(lines):
-                line = lines[lineno]
-                # Convert ANSI codes to styled fragments
-                try:
-                    formatted = list(to_formatted_text(ANSI(line + "\n")))
-                    # Remove trailing newline from fragments
-                    result = []
-                    for style, text in formatted:
-                        if text.endswith("\n"):
-                            text = text[:-1]
-                        if text:
-                            result.append((style, text))
-                    return result
-                except Exception:
-                    return [("", line)]
-            return []
-
-        return get_line
-
-    def invalidation_hash(self):
-        return None
 
 
 
@@ -158,6 +57,54 @@ class RichBackend(UIBackend):
     @property
     def is_configured(self) -> bool:
         return self._configured
+
+    @property
+    def status(self) -> StatusInfo:
+        """Current status info for views to read/update."""
+        return self._status
+
+    @property
+    def messages(self) -> list[ChatMessage]:
+        """Current message list."""
+        return self._messages
+
+    @messages.setter
+    def messages(self, value: list[ChatMessage]) -> None:
+        self._messages = value
+
+    @property
+    def session_manager(self):
+        """Session manager instance (None if not configured)."""
+        return self._session_manager
+
+    @property
+    def agent_config(self):
+        """Agent configuration (None if not configured)."""
+        return self._agent_config
+
+    @property
+    def tool_registry(self):
+        """Tool registry (None if not configured)."""
+        return self._tool_registry
+
+    @property
+    def provider_manager(self):
+        """Provider manager (None if not configured)."""
+        return self._provider_manager
+
+    def mark_session_dirty(self) -> None:
+        """Mark the current session as needing persistence."""
+        self._session_dirty = True
+
+    def clear_chat(self) -> None:
+        """Clear messages, session state, and reset counters."""
+        self._messages = []
+        if self._session_manager:
+            self._session_manager.clear_session()
+        self._session_dirty = True
+        self._status.message_count = 0
+        self._status.total_tokens = 0
+        self._status.total_cost = 0.0
 
     # --- Lifecycle ---
 
@@ -257,7 +204,7 @@ class RichBackend(UIBackend):
         self._persist_current_session()
         if self._session_manager:
             try:
-                self._session_manager._auto_save_session()
+                self._session_manager.save_session()
             except Exception as e:
                 logger.debug(f"Session save on cleanup failed: {e}")
 
@@ -309,7 +256,7 @@ class RichBackend(UIBackend):
 
     def run_main_menu(self) -> UIView | None:
         """Display main menu. Returns None to quit."""
-        menu = _MainMenu(self)
+        menu = MainMenu(self.get_status_bar)
         result = menu.run()
         if result == "quit":
             return None  # Signal to exit
@@ -386,7 +333,7 @@ class RichBackend(UIBackend):
     def get_selection(
         self, title: str, options: list[tuple[str, str, str]], subtitle: str = ""
     ) -> str | None:
-        menu = _Menu(title, options, subtitle)
+        menu = Menu(title, options, subtitle)
         return menu.run()
 
     def confirm(self, message: str, default: bool = False) -> bool:
@@ -464,7 +411,7 @@ class RichBackend(UIBackend):
         except Exception as e:
             logger.debug(f"Status update from session failed: {e}")
 
-    def _rebuild_messages_from_session(self) -> None:
+    def rebuild_messages_from_session(self) -> None:
         """Rebuild local message list from session manager turns."""
         if not self._session_manager:
             return
@@ -480,30 +427,17 @@ class RichBackend(UIBackend):
             )
         self._update_status_from_session()
 
-    def _get_status_bar(self):
+    def get_status_bar(self):
         """Get status bar formatted text."""
-        items = [
-            ("class:status-bar", " "),
-            ("class:status-provider", f"{self._status.provider or 'not configured'}"),
-            ("class:status-bar", " / "),
-            ("class:status-model", f"{self._status.model.split('/')[0] if '/' in self._status.model else self._status.model or '—'}"),
-            ("class:status-bar", " │ "),
-            ("class:status-session", f"{self._status.session or 'no session'}"),
-            ("class:status-bar", f" ({self._status.message_count})"),
-            ("class:status-bar", " │ "),
-            ("class:status-tokens", f"{self._status.total_tokens:,} tok"),
-            ("class:status-bar", " │ "),
-            ("class:status-cost", f"${self._status.total_cost:.2f}"),
-        ]
-        if self._agent_config and self._agent_config.enable_tools:
-            tool_count = len(self._tool_registry) if self._tool_registry else 0
-            mode = self._agent_config.approval_mode.value
-            items.extend([
-                ("class:status-bar", " │ "),
-                ("class:tool-running", f"Tools: {tool_count} ({mode})"),
-            ])
-        items.append(("class:status-bar", " "))
-        return items
+        from inkarms.ui.backends.rich_backend.helpers import build_status_bar
+
+        return build_status_bar(
+            self._status,
+            agent_config=self._agent_config,
+            tool_registry=self._tool_registry,
+            separator=" │ ",
+            model_format="full",
+        )
 
     def _persist_current_session(self) -> None:
         """Persist current session to snapshot storage if dirty."""
@@ -532,11 +466,10 @@ class RichBackend(UIBackend):
         snapshot = self._session_persistence.load_session(name)
         if not snapshot:
             return False
-        self._session_manager._session = snapshot.session
-        self._session_manager.tracker.track_session(snapshot.session)
+        self._session_manager.restore_session(snapshot.session)
         self._current_session = name
         self._session_dirty = False
-        self._rebuild_messages_from_session()
+        self.rebuild_messages_from_session()
         self._status.session = name
         return True
 
@@ -583,365 +516,31 @@ class RichBackend(UIBackend):
 
         return "menu"
 
-    def _build_messages(self, query: str):
-        """Build messages list for the query.
+    def _get_query_processor(self):
+        """Get the query processor, creating it if needed."""
+        from inkarms.ui.backends.rich_backend.query import QueryProcessor
 
-        When SessionManager is active, uses full conversation history.
-        Otherwise falls back to single-message mode.
-        """
-        from inkarms.models.providers import Message
+        return QueryProcessor(
+            provider_manager=self._provider_manager,
+            session_manager=self._session_manager,
+            status=self._status,
+            agent_config=self._agent_config,
+            tool_registry=self._tool_registry,
+            on_status_update=self._update_status_from_session,
+        )
 
-        # Use conversation history from session manager (includes the just-added user message)
-        if self._session_manager:
-            messages: list[Message] = []
-            for msg_dict in self._session_manager.get_messages(include_system=True):
-                messages.append(Message(role=msg_dict["role"], content=msg_dict["content"]))
-            return messages
-
-        # Fallback: single query without conversation history
-        messages = []
-        messages.append(Message.user(query))
-        return messages
-
-    def _track_response(self, content: str, cost_before: float) -> None:
-        """Track an assistant response in session manager with cost delta."""
-        if not self._session_manager:
-            return
-        try:
-            cost_delta = 0.0
-            if self._provider_manager:
-                cost_after = self._provider_manager.get_cost_summary().total_cost
-                cost_delta = cost_after - cost_before
-            self._session_manager.add_assistant_message(
-                content,
-                model=self._status.model,
-                cost=cost_delta,
-            )
-            self._update_status_from_session()
-        except Exception as e:
-            logger.debug(f"Failed to track assistant message: {e}")
-
-    def _process_query_streaming(self, query: str, on_chunk, on_complete, on_error):
+    def process_query_streaming(self, query, on_chunk, on_complete, on_error):
         """Process query with streaming, calling callbacks for each chunk."""
-        import contextlib
-        import warnings
+        return self._get_query_processor().process_streaming(
+            query, on_chunk, on_complete, on_error
+        )
 
-        # Expand @file references
-        query = self._expand_file_references(query)
-
-        if not self._provider_manager:
-            on_complete("Provider not configured")
-            return
-
-        # Track user message in session manager (with expanded text for accurate tokens)
-        if self._session_manager:
-            try:
-                self._session_manager.add_user_message(query)
-            except Exception as e:
-                logger.debug(f"Failed to track user message: {e}")
-
-        messages = self._build_messages(query)
-
-        # Capture cost before streaming for delta calculation
-        cost_before = 0.0
-        if self._provider_manager:
-            with contextlib.suppress(Exception):
-                cost_before = self._provider_manager.get_cost_summary().total_cost
-
-        def run_streaming():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-
-            loop = asyncio.new_event_loop()
-            loop.set_exception_handler(lambda lp, ctx: None)
-            asyncio.set_event_loop(loop)
-
-            async def stream_response():
-                full_content = ""
-                try:
-                    stream = await self._provider_manager.complete(
-                        messages=messages,
-                        model=self._status.model,
-                        stream=True,
-                    )
-                    async for chunk in stream:
-                        full_content += chunk.content
-                        on_chunk(chunk.content)
-                    return full_content
-                except Exception as e:
-                    traceback.print_exc()
-                    raise e
-
-            try:
-                result = loop.run_until_complete(stream_response())
-                self._track_response(result, cost_before)
-                on_complete(result)
-            except Exception as e:
-                on_error(str(e))
-            finally:
-                with contextlib.suppress(Exception):
-                    loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.close()
-
-        thread = threading.Thread(target=run_streaming, daemon=True)
-        thread.start()
-        return thread
-
-    def _process_query_agent(
+    def process_query_agent(
         self, query, event_callback, approval_callback, on_complete, on_error
     ):
         """Process query through agent loop with tool use."""
-        import contextlib
-        import warnings
-
-        query = self._expand_file_references(query)
-
-        if not self._provider_manager or not self._tool_registry or not self._agent_config:
-            on_error("Agent not configured")
-            return
-
-        if self._session_manager:
-            try:
-                self._session_manager.add_user_message(query)
-            except Exception as e:
-                logger.debug(f"Failed to track user message: {e}")
-
-        messages = self._build_messages(query)
-        msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
-
-        cost_before = 0.0
-        if self._provider_manager:
-            with contextlib.suppress(Exception):
-                cost_before = self._provider_manager.get_cost_summary().total_cost
-
-        def run_agent():
-            warnings.filterwarnings("ignore", category=RuntimeWarning)
-
-            loop = asyncio.new_event_loop()
-            loop.set_exception_handler(lambda lp, ctx: None)
-            asyncio.set_event_loop(loop)
-
-            try:
-                from inkarms.agent.loop import AgentLoop
-
-                agent_loop = AgentLoop(
-                    provider_manager=self._provider_manager,
-                    tool_registry=self._tool_registry,
-                    config=self._agent_config,
-                    approval_callback=approval_callback,
-                    event_callback=event_callback,
-                )
-                result = loop.run_until_complete(
-                    agent_loop.run(msg_dicts, model=self._status.model)
-                )
-                self._track_response(result.final_response, cost_before)
-                on_complete(result)
-            except Exception as e:
-                on_error(str(e))
-            finally:
-                # Cancel pending tasks (LiteLLM logging workers) before closing
-                with contextlib.suppress(Exception):
-                    pending = asyncio.all_tasks(loop)
-                    for task in pending:
-                        task.cancel()
-                    if pending:
-                        loop.run_until_complete(
-                            asyncio.gather(*pending, return_exceptions=True)
-                        )
-                with contextlib.suppress(Exception):
-                    loop.run_until_complete(loop.shutdown_asyncgens())
-                loop.close()
-
-        thread = threading.Thread(target=run_agent, daemon=True)
-        thread.start()
-        return thread
-
-    def _process_query(self, query: str) -> str:
-        """Process a user query and get response (non-streaming fallback)."""
-        # Expand @file references
-        query = self._expand_file_references(query)
-
-        # Track user message in session manager
-        if self._session_manager:
-            try:
-                self._session_manager.add_user_message(query)
-            except Exception as e:
-                logger.debug(f"Failed to track user message: {e}")
-
-        # Try to use the provider manager
-        if self._provider_manager:
-            try:
-                messages = self._build_messages(query)
-
-                # Get completion (async call - run in separate thread to avoid event loop conflict)
-                def run_async():
-                    import contextlib
-                    import warnings
-
-                    warnings.filterwarnings("ignore", category=RuntimeWarning)
-
-                    loop = asyncio.new_event_loop()
-                    loop.set_exception_handler(lambda lp, ctx: None)
-                    asyncio.set_event_loop(loop)
-                    try:
-                        return loop.run_until_complete(
-                            self._provider_manager.complete(
-                                messages=messages,
-                                model=self._status.model,
-                            )
-                        )
-                    finally:
-                        with contextlib.suppress(Exception):
-                            loop.run_until_complete(loop.shutdown_asyncgens())
-                        loop.close()
-
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    future = executor.submit(run_async)
-                    response = future.result()
-
-                # Track assistant message in session manager
-                if self._session_manager:
-                    try:
-                        self._session_manager.add_assistant_message(
-                            response.content,
-                            model=response.model,
-                            cost=response.cost or 0,
-                        )
-                        self._update_status_from_session()
-                    except Exception as e:
-                        logger.debug(f"Failed to track assistant message: {e}")
-                else:
-                    # Fallback: update stats directly
-                    if response.usage:
-                        self._status.total_tokens += response.usage.total_tokens
-                    self._status.total_cost += response.cost or 0
-
-                return response.content
-
-            except Exception as e:
-                logger.error(f"Provider error: {e}")
-                return f"Error: {e}"
-
-        # Fallback: simulated response
-        return "I understand. Let me help you with that. (Note: Provider not configured)"
-
-    @staticmethod
-    def _expand_file_references(text: str) -> str:
-        """Expand @path references to file contents."""
-        pattern = r"@([^\s]+)"
-
-        def replace(m):
-            path = Path(m.group(1)).expanduser()
-            if path.exists() and path.is_file():
-                try:
-                    content = path.read_text()[:2000]
-                    return f"\n[File: {m.group(1)}]\n{content}\n[End file]\n"
-
-                except Exception:
-                    pass
-            return m.group(0)
-
-        return re.sub(pattern, replace, text)
-
-
-class _Menu:
-    """Simple menu component. Used for popups, categories (e.g., Sessions view)."""
-
-    def __init__(self, title: str, items: list[tuple[str, str, str]], subtitle: str = ""):
-        self.title = title
-        self.subtitle = subtitle
-        self.items = items
-        self.selected = 0
-        self.result = None
-        self.cancelled = False
-
-    def get_formatted_text(self):
-        result = []
-        result.append(("class:title", f"\n  {self.title}\n"))
-        if self.subtitle:
-            result.append(("class:subtitle", f"  {self.subtitle}\n"))
-        result.append(("", "\n"))
-
-        for i, (value, label, desc) in enumerate(self.items):
-            if i == self.selected:
-                result.append(("class:menu-selected", f"    ❯ {label}"))
-                if desc:
-                    result.append(("class:menu-desc", f"      {desc}\n"))
-            else:
-                result.append(("class:menu-item", f"      {label}\n"))
-
-        result.append(("", "\n"))
-        result.append(("class:hint", "  ↑↓ navigate  Enter select  Esc cancel\n"))
-        return result
-
-    def run(self) -> str | None:
-        kb = bind_keys(self)
-        layout = Layout(Window(FormattedTextControl(self.get_formatted_text)))
-        app = Application(
-            layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True
+        return self._get_query_processor().process_agent(
+            query, event_callback, approval_callback, on_complete, on_error
         )
-        app.run()
-
-        return None if self.cancelled else self.result
 
 
-class _MainMenu:
-    """Main menu with branding. Used at the startup."""
-
-    def __init__(self, backend: "RichBackend"):
-        self.backend = backend
-        self.selected = 0
-        self.items = [
-            ("chat", "Chat", "Start or continue chatting"),
-            ("dashboard", "Dashboard", "View usage and stats"),
-            ("sessions", "Sessions", "Manage chat sessions"),
-            ("config", "Config", "Configure provider and model"),
-            ("quit", "Quit", ""),
-        ]
-        self.result = None
-
-    def get_formatted_text(self):
-        result = []
-
-        for line in LOGO.strip().split("\n"):
-            result.append(("class:brand", f"{line}\n"))
-
-        result.append(("class:tagline", "    Your AI assistant that does things\n"))
-        result.append(("", "\n"))
-        result.extend(self.backend._get_status_bar())
-        result.append(("", "\n\n"))
-
-        for i, (value, label, desc) in enumerate(self.items):
-            if i == self.selected:
-                result.append(("class:menu-selected", f"    ❯ {label}"))
-                result.append(("class:menu-desc", f"      {desc}\n"))
-            else:
-                result.append(("class:menu-item", f"      {label}\n"))
-
-        result.append(("", "\n"))
-        result.append(("class:hint", "    ↑↓"))
-        result.append(("class:hint-dim", " navigate  "))
-        result.append(("class:hint", "Enter"))
-        result.append(("class:hint-dim", " select  "))
-        result.append(("class:hint", "q"))
-        result.append(("class:hint-dim", " quit  "))
-        result.append(("class:hint", "c"))
-        result.append(("class:hint-dim", " chat  "))
-        result.append(("class:hint", "d"))
-        result.append(("class:hint-dim", " dashboard  "))
-        result.append(("class:hint", "s"))
-        result.append(("class:hint-dim", " sessions\n"))
-
-        return result
-
-    def run(self) -> str:
-        kb = bind_keys(
-            self,
-            ["up", "down", "enter", "escape", "c-c", "c", "d", "s"]
-        )
-        layout = Layout(Window(FormattedTextControl(self.get_formatted_text)))
-        app = Application(
-            layout=layout, key_bindings=kb, style=STYLE, full_screen=True, erase_when_done=True
-        )
-        app.run()
-
-        return self.result or "quit"

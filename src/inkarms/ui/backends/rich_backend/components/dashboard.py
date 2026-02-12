@@ -5,7 +5,15 @@ from typing import TYPE_CHECKING
 from prompt_toolkit import HTML, Application
 from prompt_toolkit.application import get_app
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.layout import HSplit, Window, FormattedTextControl, Layout, FloatContainer, Float, CompletionsMenu
+from prompt_toolkit.layout import (
+    CompletionsMenu,
+    Float,
+    FloatContainer,
+    FormattedTextControl,
+    HSplit,
+    Layout,
+    Window,
+)
 from prompt_toolkit.widgets import TextArea
 
 from inkarms.config.theme import STYLE
@@ -19,15 +27,15 @@ if TYPE_CHECKING:
 class DashboardView:
     """Dashboard view component."""
 
-    def __init__(self, backend: "RichBackend"):
+    def __init__(self, backend: RichBackend):
         self.backend = backend
         self.exit_to = UIView.MENU
 
     def get_header(self):
-        return self.backend._get_status_bar()
+        return self.backend.get_status_bar()
 
     def get_content(self):
-        s = self.backend._status
+        s = self.backend.status
         content = [
             ("class:title", "\n  Dashboard\n"),
             ("", "\n"),
@@ -56,9 +64,9 @@ class DashboardView:
         ]
 
         # Add context usage from session manager
-        if self.backend._session_manager:
+        if self.backend.session_manager:
             try:
-                usage = self.backend._session_manager.get_context_usage()
+                usage = self.backend.session_manager.get_context_usage()
                 percent = usage.usage_percent * 100
                 ctx_style = "class:warning" if usage.should_compact else "class:success"
                 content.extend(
@@ -88,9 +96,9 @@ class DashboardView:
                 pass
 
         # Tools section
-        if self.backend._agent_config:
-            ac = self.backend._agent_config
-            tool_count = len(self.backend._tool_registry) if self.backend._tool_registry else 0
+        if self.backend.agent_config:
+            ac = self.backend.agent_config
+            tool_count = len(self.backend.tool_registry) if self.backend.tool_registry else 0
             content.extend([
                 ("", "\n"),
                 ("class:info", "  ┌─ Tools & Agent ─────────────────────────────────────\n"),
@@ -126,7 +134,7 @@ class DashboardView:
         ]
 
     def run(self) -> UIView | None:
-        from inkarms.ui.backends.rich_backend.backend import COMMAND_COMPLETER
+        from inkarms.ui.backends.rich_backend.completers import COMMAND_COMPLETER
 
         input_area = TextArea(
             height=1,

@@ -167,6 +167,22 @@ class SessionManager:
 
         return turn
 
+    def save_session(self) -> None:
+        """Explicitly save the current session to daily log."""
+        if self._session is not None:
+            self._auto_save_session()
+
+    def restore_session(self, session: Session) -> None:
+        """Restore a session from an external source (e.g., a loaded snapshot).
+
+        Replaces the current session and re-tracks it.
+
+        Args:
+            session: The session to restore.
+        """
+        self._session = session
+        self.tracker.track_session(session)
+
     def _auto_save_session(self) -> None:
         """Auto-save the session to daily log."""
         try:

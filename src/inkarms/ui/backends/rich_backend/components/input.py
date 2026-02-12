@@ -3,7 +3,7 @@ from __future__ import annotations
 from prompt_toolkit import Application
 from prompt_toolkit.application import get_app
 from prompt_toolkit.buffer import Buffer
-from prompt_toolkit.layout import Layout, HSplit, Window, FormattedTextControl
+from prompt_toolkit.layout import FormattedTextControl, HSplit, Layout, Window
 from prompt_toolkit.widgets import TextArea
 
 from inkarms.config.theme import STYLE

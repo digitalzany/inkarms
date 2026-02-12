@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 import threading
-from datetime import datetime
 from typing import TYPE_CHECKING
 
 from prompt_toolkit import Application
 from prompt_toolkit.application import get_app
 from prompt_toolkit.buffer import Buffer
 from prompt_toolkit.filters import Condition
-from prompt_toolkit.layout import (Window, FormattedTextControl, BufferControl, ScrollbarMargin, HSplit, Layout,
-                                   FloatContainer, Float)
+from prompt_toolkit.layout import (
+    BufferControl,
+    Float,
+    FloatContainer,
+    FormattedTextControl,
+    HSplit,
+    Layout,
+    ScrollbarMargin,
+    Window,
+)
 
-from inkarms.config.theme import THEME_STYLES, STYLE
-from inkarms.ui.backends.rich_backend.helpers import render_styled_text, render_markdown_ansi
+from inkarms.config.theme import STYLE, THEME_STYLES
+from inkarms.ui.backends.rich_backend.helpers import render_markdown_ansi, render_styled_text
 from inkarms.ui.backends.rich_backend.key_binding import bind_keys
 from inkarms.ui.protocol import UIView
 
@@ -23,7 +30,7 @@ if TYPE_CHECKING:
 class ChatView:
     """Chat view component"""
 
-    def __init__(self, backend: "RichBackend"):
+    def __init__(self, backend: RichBackend):
         self.backend = backend
         self.exit_to: UIView | None = UIView.MENU
         self.pending_message: str | None = None
@@ -46,7 +53,7 @@ class ChatView:
     def _get_history_text(self):
         """Format message history for display - same pattern as working demo."""
         lines = []
-        messages = self.backend._messages
+        messages = self.backend.messages
 
         if not messages and not self.streaming:
             lines.append(("class:info", "  Start typing to chat...\n"))
@@ -82,255 +89,52 @@ class ChatView:
 
     def _get_status_text(self):
         """Status bar text."""
-        s = self.backend._status
-        if self.streaming:
-            return [("class:info", " Streaming response... | Ctrl+C to cancel ")]
+        from inkarms.ui.backends.rich_backend.helpers import build_status_bar
 
-        model = s.model.split("/")[1] if "/" in s.model else s.model
-        status = [
-            ("class:status-bar", " "),
-            ("class:status-provider", f"{s.provider or '—'}"),
-            ("class:status-bar", " | "),
-            ("class:status-model", f"{model or '—'}"),
-            ("class:status-bar", " | "),
-            ("class:status-session", f"{s.session or '—'}"),
-            ("class:status-bar", f" ({s.message_count}) | "),
-            ("class:status-tokens", f"{s.total_tokens:,} tok"),
-            ("class:status-bar", " | "),
-            ("class:status-cost", f"${s.total_cost:.2f}"),
-        ]
-
-        # Add context percentage when session manager is active
-        if self.backend._session_manager:
-            try:
-                usage = self.backend._session_manager.get_context_usage()
-                percent = usage.usage_percent * 100
-                ctx_style = "class:warning" if usage.should_compact else "class:status-bar"
-                status.extend(
-                    [
-                        ("class:status-bar", " | "),
-                        (ctx_style, f"ctx {percent:.0f}%"),
-                    ]
-                )
-            except Exception:
-                pass
-
-        # Add tools indicator
-        if self.backend._agent_config and self.backend._agent_config.enable_tools:
-            tool_count = len(self.backend._tool_registry) if self.backend._tool_registry else 0
-            mode = self.backend._agent_config.approval_mode.value
-            status.extend([
-                ("class:status-bar", " | "),
-                ("class:tool-running", f"Tools: {tool_count} ({mode})"),
-            ])
-        else:
-            status.extend([
-                ("class:status-bar", " | "),
-                ("class:status-bar", "Tools: off"),
-            ])
-
-        status.append(("class:status-bar", " "))
-        return status
+        return build_status_bar(
+            self.backend.status,
+            agent_config=self.backend.agent_config,
+            tool_registry=self.backend.tool_registry,
+            session_manager=self.backend.session_manager,
+            streaming=self.streaming,
+            model_format="short",
+        )
 
     def _handle_command(self, text: str):
-        parts = text.split(maxsplit=1)
-        cmd = parts[0].lower()
-        arg = parts[1].strip() if len(parts) > 1 else ""
+        from inkarms.ui.backends.rich_backend.commands import ChatCommandHandler
 
-        # Navigation commands that exit the chat view
-        nav_map = {
-            "/quit": None,
-            "/q": None,
-            "/exit": None,
-            "/menu": UIView.MENU,
-            "/m": UIView.MENU,
-            "/dashboard": UIView.DASHBOARD,
-            "/d": UIView.DASHBOARD,
-            "/sessions": UIView.SESSIONS,
-            "/s": UIView.SESSIONS,
-            "/config": UIView.CONFIG,
-            "/cfg": UIView.CONFIG,
-        }
-        if cmd in nav_map:
-            self.exit_to = nav_map[cmd]
+        result = ChatCommandHandler(self.backend).handle(text)
+        if result.should_exit:
+            self.exit_to = result.navigate_to
             get_app().exit()
             return
-
-        # In-chat commands
-        if cmd == "/clear":
-            self._cmd_clear()
-        elif cmd == "/help":
-            self.pending_message = (
-                "Commands: /menu /dashboard /sessions /clear /usage /status "
-                "/save [name] /load <name> /history /model /tools /agent [mode] /quit "
-                "| Use @file to include file"
-            )
-        elif cmd == "/usage":
-            self._cmd_usage()
-        elif cmd == "/status":
-            self._cmd_status()
-        elif cmd == "/save":
-            self._cmd_save(arg)
-        elif cmd == "/load":
-            self._cmd_load(arg)
-        elif cmd == "/history":
-            self._cmd_history()
-        elif cmd == "/model":
-            self._cmd_model(arg)
-        elif cmd == "/chat":
-            pass  # Already in chat
-        elif cmd == "/tools":
-            self._cmd_tools()
-        elif cmd == "/agent":
-            self._cmd_agent(arg)
-        else:
-            self.pending_message = f"Unknown command: {cmd}. Type /help for available commands."
-
-        # Refresh display
+        if result.message:
+            self.pending_message = result.message
         if self.app:
             self.app.invalidate()
 
-    def _cmd_clear(self):
-        self.backend._messages = []
-        if self.backend._session_manager:
-            self.backend._session_manager.clear_session()
-        self.backend._session_dirty = True
-        self.backend._status.message_count = 0
-        self.backend._status.total_tokens = 0
-        self.backend._status.total_cost = 0.0
-        self.pending_message = "Chat cleared"
-
-    def _cmd_usage(self):
-        if self.backend._session_manager:
-            usage = self.backend._session_manager.get_context_usage()
-            info = self.backend._session_manager.get_session_info()
-            self.pending_message = (
-                f"Tokens: {usage.current_tokens:,}/{usage.max_tokens:,} "
-                f"({usage.usage_percent * 100:.1f}%) | "
-                f"Cost: ${info['total_cost']:.4f} | "
-                f"Turns: {info['turn_count']}"
-            )
-        else:
-            s = self.backend._status
-            self.pending_message = f"Tokens: {s.total_tokens:,} | Cost: ${s.total_cost:.4f}"
-
-    def _cmd_status(self):
-        status_parts = [
-            f"Provider: {self.backend._status.provider}",
-            f"Model: {self.backend._status.model}",
-        ]
-        if self.backend._session_manager:
-            usage = self.backend._session_manager.get_context_usage()
-            status_parts.append(f"Context: {usage.usage_percent * 100:.1f}%")
-            if usage.should_handoff:
-                status_parts.append("HANDOFF RECOMMENDED")
-            elif usage.should_compact:
-                status_parts.append("Compaction recommended")
-        self.pending_message = " | ".join(status_parts)
-
-    def _cmd_save(self, arg: str):
-        name = arg or f"session-{datetime.now().strftime('%Y%m%d-%H%M')}"
-        if self.backend._session_manager:
-            try:
-                self.backend._session_manager.save_snapshot(name)
-                self.pending_message = f"Session saved as '{name}'"
-            except Exception as e:
-                self.pending_message = f"Save failed: {e}"
-        else:
-            self.pending_message = "Session manager not available"
-
-    def _cmd_load(self, arg: str):
-        if not self.backend._session_manager:
-            self.pending_message = "Session manager not available"
-            return
-
-        if not arg:
-            # List available snapshots
-            entries = self.backend._session_manager.list_memory("snapshot")
-            if entries:
-                names = [e.name for e in entries]
-                self.pending_message = f"Snapshots: {', '.join(names)} | /load <name>"
-            else:
-                self.pending_message = "No snapshots found"
-            return
-
-        session = self.backend._session_manager.load_snapshot(arg)
-        if session:
-            self.backend._rebuild_messages_from_session()
-            self.pending_message = f"Session '{arg}' loaded"
-        else:
-            self.pending_message = f"Snapshot '{arg}' not found"
-
-    def _cmd_history(self):
-        if self.backend._session_manager:
-            turns = self.backend._session_manager.session.turns
-            if turns:
-                count = len(turns)
-                first = turns[0].timestamp.strftime("%H:%M")
-                last = turns[-1].timestamp.strftime("%H:%M")
-                self.pending_message = f"History: {count} turns ({first} - {last})"
-            else:
-                self.pending_message = "No history in current session"
-        else:
-            self.pending_message = f"Messages: {len(self.backend._messages)}"
-
-    def _cmd_model(self, arg: str):
-        if arg and self.backend._session_manager:
-            self.backend._session_manager.set_model(arg)
-            self.backend._status.model = arg
-            self.pending_message = f"Model changed to: {arg}"
-        else:
-            self.pending_message = f"Current model: {self.backend._status.model}"
-
-    def _cmd_tools(self):
-        registry = self.backend._tool_registry
-        if not registry or len(registry) == 0:
-            self.pending_message = "No tools registered"
-            return
-        tools = registry.list_tools()
-        parts = []
-        for tool in tools:
-            label = f"{tool.name} [!]" if tool.is_dangerous else tool.name
-            parts.append(label)
-        mode = "off"
-        if self.backend._agent_config:
-            mode = self.backend._agent_config.approval_mode.value
-        self.pending_message = f"Tools ({mode}): {', '.join(parts)}"
-
-    def _cmd_agent(self, arg: str):
-        config = self.backend._agent_config
-        if not config:
-            self.pending_message = "Agent not configured"
-            return
-        if not arg:
-            mode = config.approval_mode.value
-            enabled = config.enable_tools
-            iters = config.max_iterations
-            self.pending_message = (
-                f"Agent: tools={'on' if enabled else 'off'} mode={mode} "
-                f"max_iterations={iters}"
-            )
-            return
-        from inkarms.models.agent import ApprovalMode
-
-        valid = {m.value for m in ApprovalMode}
-        if arg in valid:
-            config.approval_mode = ApprovalMode(arg)
-            self.pending_message = f"Agent mode changed to: {arg}"
-        elif arg == "on":
-            config.enable_tools = True
-            self.pending_message = "Tools enabled"
-        elif arg == "off":
-            config.enable_tools = False
-            self.pending_message = "Tools disabled"
-        else:
-            self.pending_message = "Usage: /agent [on|off|auto|manual|disabled]"
-
     def run(self) -> UIView | None:
-        from prompt_toolkit.widgets import Frame, TextArea
-        from inkarms.ui.backends.rich_backend.backend import COMMAND_COMPLETER, AnsiLexer
+        self._build_input_area()
+        self.chat_buffer = Buffer(read_only=True)
+        self._update_chat_buffer()
+        layout = self._build_layout()
 
-        # Input area with command completion
+        self.app = Application(
+            layout=layout,
+            key_bindings=self._key_bindings,
+            style=STYLE,
+            full_screen=True,
+            mouse_support=True,
+        )
+        self.app.run()
+        return self.exit_to
+
+    def _build_input_area(self) -> None:
+        """Create the input TextArea with command completion."""
+        from prompt_toolkit.widgets import TextArea
+
+        from inkarms.ui.backends.rich_backend.completers import COMMAND_COMPLETER
+
         def _on_accept_handler(buff: Buffer) -> bool:
             self._on_accept(buff)
             self.input_area.text = ""
@@ -346,7 +150,110 @@ class ChatView:
             style="class:user-input",
         )
 
-        # Layout
+    def _update_chat_buffer(self) -> None:
+        """Update chat buffer with markdown-rendered content as ANSI text."""
+        from prompt_toolkit.document import Document
+
+        lines = []
+        messages = self.backend.messages
+
+        try:
+            width = get_app().output.get_size().columns - 4
+        except Exception:
+            width = 100
+
+        if not messages and not self.streaming:
+            lines.append("  Start typing to chat...")
+            lines.append("  Type /help for commands")
+        else:
+            for msg in messages:
+                ts = (
+                    f"[{msg.timestamp}] "
+                    if msg.timestamp and self.backend.config.show_timestamps
+                    else ""
+                )
+                if msg.role == "user":
+                    lines.append(
+                        render_styled_text(f"{ts}You: {msg.content}", THEME_STYLES["user"])
+                    )
+                    lines.append("")
+                else:
+                    try:
+                        rendered = render_markdown_ansi(
+                            msg.content,
+                            width=width,
+                            style=THEME_STYLES.get("assistant-text", ""),
+                            wrap_in_panel=True,
+                            panel_title=f"{ts}Assistant",
+                            panel_border_style=THEME_STYLES["assistant"],
+                        )
+                        lines.append(rendered)
+                    except Exception:
+                        lines.append(msg.content)
+                    lines.append("")
+
+        if self.streaming:
+            self._render_streaming_content(lines, width)
+
+        if self.pending_message:
+            lines.append("")
+            lines.append(f"  {self.pending_message}")
+
+        text = "\n".join(lines)
+        self.chat_buffer.set_document(Document(text, len(text)), bypass_readonly=True)
+
+    def _render_streaming_content(self, lines: list[str], width: int) -> None:
+        """Render streaming, tool, and approval content into lines."""
+        for block in self._tool_blocks:
+            lines.append(block)
+
+        if self.streaming_content:
+            try:
+                rendered = render_markdown_ansi(
+                    self.streaming_content + "▌",
+                    width=width,
+                    style=THEME_STYLES.get("assistant-text", ""),
+                    wrap_in_panel=True,
+                    panel_title="Assistant (thinking...)",
+                    panel_border_style=THEME_STYLES["assistant"],
+                )
+                lines.append(rendered)
+            except Exception:
+                lines.append(self.streaming_content + "▌")
+        elif self._pending_approval_info:
+            name, args_str, dangerous = self._pending_approval_info
+            danger_tag = " [DANGEROUS]" if dangerous else ""
+            lines.append(
+                render_styled_text(
+                    f"  Tool requires approval: {name}{danger_tag}",
+                    THEME_STYLES["warning"],
+                )
+            )
+            lines.append(f"  Args: {args_str[:100]}")
+            lines.append(
+                render_styled_text(
+                    "  [a] Allow  [d] Deny  [A] Allow All",
+                    THEME_STYLES["hint"],
+                )
+            )
+        elif self._current_tool_status:
+            lines.append(
+                render_styled_text(
+                    f"  {self._current_tool_status}▌",
+                    THEME_STYLES["tool-running"],
+                )
+            )
+        else:
+            lines.append(render_styled_text("Assistant:", THEME_STYLES["assistant"]))
+            lines.append("thinking...▌")
+
+    def _build_layout(self) -> Layout:
+        """Build the prompt_toolkit layout for the chat view."""
+        from prompt_toolkit.layout.menus import CompletionsMenu
+        from prompt_toolkit.widgets import Frame
+
+        from inkarms.ui.backends.rich_backend.completers import AnsiLexer
+
         header = Window(
             content=FormattedTextControl(
                 lambda: [
@@ -359,116 +266,6 @@ class ChatView:
             height=1,
         )
 
-        # Use Buffer + BufferControl for native scrolling
-        from prompt_toolkit.document import Document
-
-        self.chat_buffer = Buffer(read_only=True)
-
-        def update_chat_buffer():
-            """Update chat buffer with markdown-rendered content as ANSI text."""
-            lines = []
-            messages = self.backend._messages
-
-            # Calculate available width (fallback to 100 if app not fully ready)
-            try:
-                width = get_app().output.get_size().columns - 4
-
-            except Exception:
-                width = 100
-
-            if not messages and not self.streaming:
-                lines.append("  Start typing to chat...")
-                lines.append("  Type /help for commands")
-            else:
-                for msg in messages:
-                    ts = (
-                        f"[{msg.timestamp}] "
-                        if msg.timestamp and self.backend.config.show_timestamps
-                        else ""
-                    )
-                    if msg.role == "user":
-                        lines.append(
-                            render_styled_text(f"{ts}You: {msg.content}", THEME_STYLES["user"])
-                        )
-                        lines.append("")
-                    else:
-                        # For assistant, we use a Panel and omit the separate header
-                        try:
-                            rendered = render_markdown_ansi(
-                                msg.content,
-                                width=width,
-                                style=THEME_STYLES.get("assistant-text", ""),
-                                wrap_in_panel=True,
-                                panel_title=f"{ts}Assistant",
-                                panel_border_style=THEME_STYLES["assistant"],
-                            )
-                            lines.append(rendered)
-
-                        except Exception:
-                            lines.append(msg.content)
-                        lines.append("")
-
-            if self.streaming:
-                # Show tool blocks from agent mode
-                for block in self._tool_blocks:
-                    lines.append(block)
-
-                # Streaming content (standard streaming mode)
-                if self.streaming_content:
-                    try:
-                        rendered = render_markdown_ansi(
-                            self.streaming_content + "▌",
-                            width=width,
-                            style=THEME_STYLES.get("assistant-text", ""),
-                            wrap_in_panel=True,
-                            panel_title="Assistant (thinking...)",
-                            panel_border_style=THEME_STYLES["assistant"],
-                        )
-                        lines.append(rendered)
-
-                    except Exception:
-                        lines.append(self.streaming_content + "▌")
-
-                elif self._pending_approval_info:
-                    # Show approval prompt
-                    name, args_str, dangerous = self._pending_approval_info
-                    danger_tag = " [DANGEROUS]" if dangerous else ""
-                    lines.append(
-                        render_styled_text(
-                            f"  Tool requires approval: {name}{danger_tag}",
-                            THEME_STYLES["warning"],
-                        )
-                    )
-                    lines.append(f"  Args: {args_str[:100]}")
-                    lines.append(
-                        render_styled_text(
-                            "  [a] Allow  [d] Deny  [A] Allow All",
-                            THEME_STYLES["hint"],
-                        )
-                    )
-                elif self._current_tool_status:
-                    lines.append(
-                        render_styled_text(
-                            f"  {self._current_tool_status}▌",
-                            THEME_STYLES["tool-running"],
-                        )
-                    )
-                else:
-                    lines.append(render_styled_text("Assistant:", THEME_STYLES["assistant"]))
-                    lines.append("thinking...▌")
-
-            if self.pending_message:
-                lines.append("")
-                lines.append(f"  {self.pending_message}")
-
-            text = "\n".join(lines)
-            # Move cursor to end for auto-scroll
-            self.chat_buffer.set_document(Document(text, len(text)), bypass_readonly=True)
-
-        # Initial update
-        update_chat_buffer()
-        self._update_chat_buffer = update_chat_buffer
-
         chat_control = BufferControl(
             buffer=self.chat_buffer,
             focusable=True,
@@ -479,7 +276,7 @@ class ChatView:
             content=chat_control,
             wrap_lines=True,
             right_margins=[ScrollbarMargin(display_arrows=True)],
-            scroll_offsets=None,  # Let the window scroll freely
+            scroll_offsets=None,
             allow_scroll_beyond_bottom=True,
         )
 
@@ -488,7 +285,6 @@ class ChatView:
             height=1,
         )
 
-        # Use FloatContainer for completion menu
         body = HSplit(
             [
                 header,
@@ -497,8 +293,6 @@ class ChatView:
                 status_bar,
             ]
         )
-
-        from prompt_toolkit.layout.menus import CompletionsMenu
 
         layout = Layout(
             FloatContainer(
@@ -513,16 +307,7 @@ class ChatView:
             )
         )
         layout.focus(self.input_area)
-
-        self.app = Application(
-            layout=layout,
-            key_bindings=self._key_bindings,
-            style=STYLE,
-            full_screen=True,
-            mouse_support=True,
-        )
-        self.app.run()
-        return self.exit_to
+        return layout
 
 
     def add_key_bindings(self) -> None:
@@ -593,8 +378,8 @@ class ChatView:
         def approve_all_tools(event):
             from inkarms.models.agent import ApprovalMode
 
-            if self.backend._agent_config:
-                self.backend._agent_config.approval_mode = ApprovalMode.AUTO
+            if self.backend.agent_config:
+                self.backend.agent_config.approval_mode = ApprovalMode.AUTO
             self._approval_result = True
             self._approval_event.set()
 
@@ -619,10 +404,10 @@ class ChatView:
 
         # Dispatch: agent mode vs streaming mode
         tools_enabled = (
-            self.backend._agent_config is not None
-            and self.backend._agent_config.enable_tools
-            and self.backend._tool_registry is not None
-            and len(self.backend._tool_registry) > 0
+            self.backend.agent_config is not None
+            and self.backend.agent_config.enable_tools
+            and self.backend.tool_registry is not None
+            and len(self.backend.tool_registry) > 0
         )
         if tools_enabled:
             self._start_agent_query(text)
@@ -657,7 +442,7 @@ class ChatView:
             if self.app:
                 self.app.invalidate()
 
-        self.backend._process_query_streaming(text, on_chunk, on_complete, on_error)
+        self.backend.process_query_streaming(text, on_chunk, on_complete, on_error)
 
     def _start_agent_query(self, text):
         """Start an agent query with tool use."""
@@ -666,7 +451,7 @@ class ChatView:
         self._tool_blocks = []
         self._current_tool_status = "Thinking..."
 
-        self.backend._process_query_agent(
+        self.backend.process_query_agent(
             text,
             self._handle_agent_event,
             self._handle_agent_approval,
@@ -757,9 +542,9 @@ class ChatView:
 
     def _show_context_warnings(self):
         """Show context usage warnings if approaching limits."""
-        if self.backend._session_manager:
+        if self.backend.session_manager:
             try:
-                usage = self.backend._session_manager.get_context_usage()
+                usage = self.backend.session_manager.get_context_usage()
                 if usage.should_handoff:
                     self.pending_message = (
                         f"Context at {usage.usage_percent * 100:.0f}% capacity. "

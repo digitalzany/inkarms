@@ -1,27 +1,56 @@
-from typing import TYPE_CHECKING, Iterable
+"""Key binding setup for Rich backend UI components."""
 
-from inkarms.ui.protocol import UIView
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
 from prompt_toolkit.key_binding import KeyBindings
 
+from inkarms.ui.protocol import UIView
+
 if TYPE_CHECKING:
-    from inkarms.ui.backends.rich_backend.backend import _Menu, _MainMenu
-    from inkarms.ui.backends.rich_backend.components.input import TextInput
-    from inkarms.ui.backends.rich_backend.components.chat import ChatView
-    from inkarms.ui.backends.rich_backend.components.dashboard import DashboardView
+    from collections.abc import Iterable
+
+    from prompt_toolkit.buffer import Buffer
+
+
+@runtime_checkable
+class MenuLike(Protocol):
+    """Protocol for menu components that support navigation."""
+
+    selected: int
+    items: list[tuple[str, str, str]]
+    result: str | None
+
+
+@runtime_checkable
+class Cancellable(Protocol):
+    """Protocol for components that can be cancelled."""
+
+    cancelled: bool
+
+
+@runtime_checkable
+class ChatLike(Protocol):
+    """Protocol for chat-like components with scroll and exit."""
+
+    exit_to: UIView | None
+    chat_buffer: Buffer
 
 
 def bind_keys(
-        ui_instance: "_Menu | _MainMenu | DashboardView | ChatView | TextInput",
-        required_keys: Iterable[str] = ("up", "down", "enter", "escape", "c-c")
+    ui_instance: MenuLike | ChatLike | Cancellable,
+    required_keys: Iterable[str] = ("up", "down", "enter", "escape", "c-c"),
 ) -> KeyBindings:
+    """Bind keys to actions for a UI component.
+
+    Args:
+        ui_instance: The UI component to bind keys for.
+        required_keys: Keys to bind. Use comma-separated strings for multi-key
+            bindings (e.g. "c-c,c-q,escape").
     """
-    Common key binding function for Rich backend UI elements.
-    :param ui_instance:
-    :param required_keys: list of keys to bind to actions (using prompt_toolkit.key_binding.KeyBindings format).
-    For single key bindings, use a string (e.g. "c-c"). For multiple keys, use a comma-separated string (e.g. "c-c,c-q,escape").
-    If None, default keys are set: up, down, enter, escape, ctrl-c.
-    :return: prompt_toolkit.key_binding.KeyBindings object
-    """
+    # --- Menu navigation handlers ---
+
     def up(event):
         ui_instance.selected = (ui_instance.selected - 1) % len(ui_instance.items)
 
@@ -40,6 +69,8 @@ def bind_keys(
         ui_instance.cancelled = True
         event.app.exit()
 
+    # --- Main menu shortcut handlers ---
+
     def chat(event):
         ui_instance.result = "chat"
         event.app.exit()
@@ -51,6 +82,8 @@ def bind_keys(
     def sessions(event):
         ui_instance.result = "sessions"
         event.app.exit()
+
+    # --- Input handlers ---
 
     def tab(event):
         buff = event.app.current_buffer
@@ -65,21 +98,21 @@ def bind_keys(
         if buff.text.startswith("/"):
             buff.start_completion(select_first=False)
 
+    # --- Chat handlers ---
+
     def exit_from_chat(event):
         ui_instance.exit_to = UIView.MENU
         event.app.exit()
 
     def scroll_top(event):
-        """Suitable for _Chat instance"""
         if ui_instance.chat_buffer:
             ui_instance.chat_buffer.cursor_position = 0
 
     def scroll_bottom(event):
-        """Suitable for _Chat instance"""
         if ui_instance.chat_buffer:
             ui_instance.chat_buffer.cursor_position = len(ui_instance.chat_buffer.text)
 
-    key_to_action_mapping = {
+    key_to_action = {
         "up": up,
         "down": down,
         "enter": enter,
@@ -92,16 +125,14 @@ def bind_keys(
         "backspace": backspace,
         "c-c,c-q,escape": exit_from_chat,
         "home": scroll_top,
-        "end": scroll_bottom
+        "end": scroll_bottom,
     }
 
     kb = KeyBindings()
-
     for key in required_keys:
-        func = key_to_action_mapping.get(key, None)
+        func = key_to_action.get(key)
         if not func:
             continue
-
         for k in key.split(","):
             kb.add(k)(func)
 
