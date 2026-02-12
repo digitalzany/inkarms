@@ -577,7 +577,7 @@ class MessageProcessor:
                 try:
                     session_manager = get_session_manager(session_id=session_id)
                     summary = manager.get_cost_summary()
-                    resolved_model = manager._resolve_model(model)
+                    resolved_model = manager.resolve_model(model)
                     session_manager.add_assistant_message(
                         response_text,
                         model=resolved_model,

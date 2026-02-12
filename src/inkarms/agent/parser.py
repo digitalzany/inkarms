@@ -1,5 +1,6 @@
 """Parser for extracting tool calls from AI responses."""
 
+import json
 import logging
 from typing import Any
 
@@ -76,7 +77,6 @@ class ToolCallParser:
             # Handle case where input is a JSON string instead of dict
             if isinstance(tool_input, str):
                 try:
-                    import json
                     tool_input = json.loads(tool_input)
                 except json.JSONDecodeError:
                     logger.warning(f"Failed to parse tool input as JSON: {tool_input}")

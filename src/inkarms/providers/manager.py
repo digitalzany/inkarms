@@ -79,7 +79,7 @@ class ProviderManager:
         if loaded:
             logger.debug(f"Loaded secrets: {list(loaded.keys())}")
 
-    def _resolve_model(self, model: str | None) -> str:
+    def resolve_model(self, model: str | None) -> str:
         """
         Resolve model name from alias or default.
 
@@ -148,7 +148,7 @@ class ProviderManager:
             ProviderError: For other provider-related errors.
         """
         # Resolve model name
-        resolved_model = self._resolve_model(model)
+        resolved_model = self.resolve_model(model)
         logger.info(f"Completing with model: {resolved_model}")
 
         # Convert messages
@@ -172,7 +172,7 @@ class ProviderManager:
                 return self._stream_completion(**request_kwargs)
             else:
                 response = await acompletion(**request_kwargs)
-                return self._parse_response(response, resolved_model)
+                return self.parse_response(response, resolved_model)
 
         except Exception as e:
             # Try fallback chain
@@ -208,7 +208,7 @@ class ProviderManager:
                     model=model,
                 )
 
-    def _parse_response(
+    def parse_response(
         self,
         response: Any,
         model: str,
@@ -301,7 +301,7 @@ class ProviderManager:
                 else:
                     response = await acompletion(**kwargs)
                     fallback.mark_success(next_provider)
-                    return self._parse_response(response, next_provider)
+                    return self.parse_response(response, next_provider)
 
             except Exception as e:
                 fallback.mark_failed(next_provider, e)
@@ -333,7 +333,7 @@ class ProviderManager:
             AuthenticationError: If authentication fails.
             ProviderError: If provider test fails.
         """
-        resolved = self._resolve_model(provider)
+        resolved = self.resolve_model(provider)
 
         if test:
             # Test connection with simple request

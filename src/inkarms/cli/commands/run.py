@@ -280,7 +280,7 @@ async def _run_completion(
         raise typer.Exit(1)
 
     # Show what we're doing
-    resolved_model = manager._resolve_model(model)
+    resolved_model = manager.resolve_model(model)
     console.print(f"[dim]Model: {resolved_model}[/dim]")
 
     try:

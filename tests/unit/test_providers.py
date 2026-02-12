@@ -357,8 +357,8 @@ class TestProviderManager:
         secrets = SecretsManager(secrets_dir=temp_dir / "secrets")
         manager = ProviderManager(config, secrets)
 
-        assert manager._resolve_model(None) == "anthropic/claude-3"
-        assert manager._resolve_model("default") == "anthropic/claude-3"
+        assert manager.resolve_model(None) == "anthropic/claude-3"
+        assert manager.resolve_model("default") == "anthropic/claude-3"
 
     def test_resolve_model_alias(self, temp_dir):
         """Test resolving model alias."""
@@ -369,7 +369,7 @@ class TestProviderManager:
         secrets = SecretsManager(secrets_dir=temp_dir / "secrets")
         manager = ProviderManager(config, secrets)
 
-        assert manager._resolve_model("fast") == "openai/gpt-3.5-turbo"
+        assert manager.resolve_model("fast") == "openai/gpt-3.5-turbo"
 
     def test_resolve_model_direct(self, temp_dir):
         """Test resolving direct model name."""
@@ -377,7 +377,7 @@ class TestProviderManager:
         secrets = SecretsManager(secrets_dir=temp_dir / "secrets")
         manager = ProviderManager(config, secrets)
 
-        assert manager._resolve_model("openai/gpt-4") == "openai/gpt-4"
+        assert manager.resolve_model("openai/gpt-4") == "openai/gpt-4"
 
     def test_extract_provider(self, temp_dir):
         """Test extracting provider from model string."""

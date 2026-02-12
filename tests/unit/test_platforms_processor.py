@@ -46,7 +46,7 @@ def mock_skill_manager():
 def mock_provider_manager():
     """Create a mock provider manager."""
     manager = AsyncMock()
-    manager._resolve_model = Mock(return_value="gpt-4")
+    manager.resolve_model = Mock(return_value="gpt-4")
     manager.get_cost_summary = Mock()
     return manager
 
