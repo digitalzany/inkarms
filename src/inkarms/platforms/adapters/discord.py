@@ -13,7 +13,7 @@ from inkarms.models.platforms import (
     PlatformUser,
     StreamChunk,
 )
-from inkarms.platforms.protocol import PlatformAdapter
+from inkarms.platforms.adapters.protocol import PlatformAdapter
 
 logger = logging.getLogger(__name__)
 

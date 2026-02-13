@@ -21,7 +21,7 @@ from inkarms.models.platforms import (
     PlatformType,
     PlatformUser,
 )
-from inkarms.platforms.protocol import PlatformAdapter
+from inkarms.platforms.adapters.protocol import PlatformAdapter
 
 __all__ = [
     "PlatformAdapter",

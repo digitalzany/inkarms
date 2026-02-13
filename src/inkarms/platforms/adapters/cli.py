@@ -14,7 +14,7 @@ from inkarms.models.platforms import (
     PlatformType,
     StreamChunk,
 )
-from inkarms.platforms.protocol import PlatformAdapter
+from inkarms.platforms.adapters.protocol import PlatformAdapter
 
 
 class CLIAdapter(PlatformAdapter):

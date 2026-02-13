@@ -6,7 +6,8 @@ from collections.abc import AsyncIterator
 from typing import Optional
 
 from inkarms.models.platforms import IncomingMessage, OutgoingMessage, StreamChunk
-from inkarms.platforms.protocol import PlatformAdapter
+from inkarms.platforms.adapters.protocol import PlatformAdapter
+from inkarms.platforms.processor import MessageProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +33,7 @@ class MessageRouter:
         self._tasks: set[asyncio.Task] = set()
         self._running = False
         self._max_concurrent_tasks = max_concurrent_tasks
+        self._message_processor: Optional[MessageProcessor] = MessageProcessor()
         self._semaphore: Optional[asyncio.Semaphore] = None
 
     def register_adapter(self, adapter: PlatformAdapter) -> None:
@@ -172,17 +174,25 @@ class MessageRouter:
         """
         logger.info(f"Received message: {message}")
 
+        response = await self._message_processor.process(
+            query=message.content,
+            session_id=message.thread_id,
+            platform_user_id=message.user.platform_user_id,
+            platform_username=message.user.username or message.user.display_name,
+        )
+
         # Placeholder: Echo the message back
         # This will be replaced with actual message processing
         response = OutgoingMessage(
-            content=f"Received: {message.content}",
-            format="plain",
+            content=f"{response.content}",
+            format="markdown",
             thread_id=message.thread_id,
             reply_to_message_id=message.message_id,
         )
 
         try:
             await adapter.send_message(message.user.platform_user_id, response)
+
         except Exception as e:
             logger.error(f"Failed to send response: {e}", exc_info=True)
 

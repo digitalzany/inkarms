@@ -84,6 +84,7 @@ class MessageProcessor:
         """
         self._skill_manager = skill_manager or get_skill_manager()
         self._config = get_config()
+        self._session_manager = get_session_manager(model=self._config.providers.default)
         self._audit_logger = get_audit_logger()
         self._event_callback = event_callback
         self._tool_approval_callback = tool_approval_callback
@@ -143,20 +144,18 @@ class MessageProcessor:
             messages.append(Message.system(system_prompt))
 
         # Get session manager if tracking context
-        session_manager = None
         if session_id:
             try:
-                session_manager = get_session_manager(session_id=session_id)
                 if system_prompt:
-                    session_manager.set_system_prompt(system_prompt)
+                    self._session_manager.set_system_prompt(system_prompt)
             except Exception as e:
                 logger.error(f"Failed to get session manager: {e}")
 
         # Add user query
         messages.append(Message.user(query))
-        if session_manager:
+        if self._session_manager:
             try:
-                session_manager.add_user_message(query)
+                self._session_manager.add_user_message(query)
             except Exception as e:
                 logger.error(f"Failed to add user message to session: {e}")
 
@@ -217,6 +216,8 @@ class MessageProcessor:
         # Build messages
         messages = self._build_messages(query, skills, session_id)
 
+        self._session_manager.set_model(model)
+
         # Get provider manager
         try:
             manager = get_provider_manager()
@@ -267,17 +268,16 @@ class MessageProcessor:
                 # Track in session if enabled
                 if session_id:
                     try:
-                        session_manager = get_session_manager(session_id=session_id)
-                        session_manager.add_assistant_message(
+                        self._session_manager.add_assistant_message(
                             result.final_response,
-                            model=summary.last_model if summary else model or "unknown",
+                            model=self._session_manager.model or "unknown",
                             cost=summary.total_cost if summary else 0.0,
                         )
                     except Exception as e:
                         logger.error(f"Failed to track response in session: {e}")
 
                 # Log response
-                total_tokens = summary.total_tokens if summary else 0
+                total_tokens = self._session_manager.session.metadata.total_tokens if self._session_manager.session.metadata else 0
                 if platform != PlatformType.CLI and platform_user_id:
                     self._audit_logger.log_platform_message_sent(
                         platform=platform.value,
@@ -298,10 +298,10 @@ class MessageProcessor:
 
                 return ProcessedResponse(
                     content=result.final_response,
-                    model=summary.last_model if summary else model or "unknown",
-                    provider=summary.last_provider if summary else "unknown",
-                    input_tokens=summary.input_tokens if summary else 0,
-                    output_tokens=summary.output_tokens if summary else 0,
+                    model=model or "unknown",
+                    provider=self._config.providers.default or "unknown",
+                    input_tokens=summary.total_input_tokens if summary else 0,
+                    output_tokens=summary.total_output_tokens if summary else 0,
                     cost=summary.total_cost if summary else 0.0,
                     finish_reason=result.stopped_reason,
                     error=result.error,
@@ -337,8 +337,7 @@ class MessageProcessor:
             # Track in session if enabled
             if session_id:
                 try:
-                    session_manager = get_session_manager(session_id=session_id)
-                    session_manager.add_assistant_message(
+                    self._session_manager.add_assistant_message(
                         response.content,
                         model=response.model,
                         cost=response.cost,
@@ -471,6 +470,8 @@ class MessageProcessor:
         # Build messages
         messages = self._build_messages(query, skills, session_id)
 
+        self._session_manager.set_model(model)
+
         # Get provider manager
         try:
             manager = get_provider_manager()
@@ -519,17 +520,16 @@ class MessageProcessor:
                 # Track in session if enabled
                 if session_id:
                     try:
-                        session_manager = get_session_manager(session_id=session_id)
-                        session_manager.add_assistant_message(
+                        self._session_manager.add_assistant_message(
                             result.final_response,
-                            model=summary.last_model if summary else model or "unknown",
+                            model=self._session_manager.model or "unknown",
                             cost=summary.total_cost if summary else 0.0,
                         )
                     except Exception as e:
                         logger.error(f"Failed to track response in session: {e}")
 
                 # Log response
-                total_tokens = summary.total_tokens if summary else 0
+                total_tokens = self._session_manager.session.metadata.total_tokens if self._session_manager.session.metadata else 0
                 if platform != PlatformType.CLI and platform_user_id:
                     self._audit_logger.log_platform_message_sent(
                         platform=platform.value,
@@ -575,10 +575,9 @@ class MessageProcessor:
             # Track in session if enabled
             if session_id:
                 try:
-                    session_manager = get_session_manager(session_id=session_id)
                     summary = manager.get_cost_summary()
                     resolved_model = manager.resolve_model(model)
-                    session_manager.add_assistant_message(
+                    self._session_manager.add_assistant_message(
                         response_text,
                         model=resolved_model,
                         cost=summary.total_cost,
@@ -590,7 +589,7 @@ class MessageProcessor:
             if platform != PlatformType.CLI and platform_user_id:
                 # Get summary for tokens and cost
                 summary = manager.get_cost_summary()
-                total_tokens = summary.total_tokens if summary else 0
+                total_tokens = self._session_manager.session.metadata.total_tokens if self._session_manager.session.metadata else 0
                 total_cost = summary.total_cost if summary else 0.0
                 self._audit_logger.log_platform_message_sent(
                     platform=platform.value,

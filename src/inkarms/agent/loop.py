@@ -624,8 +624,9 @@ class AgentLoop:
             ],
         }
 
+    @staticmethod
     def _add_tool_results_to_conversation(
-        self, conversation: list[dict[str, Any]], tool_results: list[ToolResult]
+        conversation: list[dict[str, Any]], tool_results: list[ToolResult]
     ) -> None:
         """Add tool results to conversation in OpenAI format.
 

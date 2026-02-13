@@ -13,7 +13,7 @@ from inkarms.models.platforms import (
     PlatformUser,
     StreamChunk,
 )
-from inkarms.platforms.protocol import PlatformAdapter
+from inkarms.platforms.adapters.protocol import PlatformAdapter
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +22,7 @@ try:
     from telegram.ext import Application, MessageHandler, filters
     from telegram.constants import ParseMode, ChatAction
     from telegram.error import TelegramError
+    from telegram.helpers import escape_markdown
 
     TELEGRAM_AVAILABLE = True
 except ImportError:
@@ -349,7 +350,7 @@ class TelegramAdapter(PlatformAdapter):
         if format == "markdown" and self._parse_mode == "MarkdownV2":
             # For MarkdownV2, certain characters need escaping
             # This is a simplified version - full implementation would be more complex
-            return content
+            return escape_markdown(content, version=2)
 
         return content
 

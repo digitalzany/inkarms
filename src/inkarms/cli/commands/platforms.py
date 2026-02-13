@@ -18,7 +18,7 @@ from rich.table import Table
 from inkarms.audit import get_audit_logger
 from inkarms.config import get_config
 from inkarms.models.platforms import OutgoingMessage, PlatformType
-from inkarms.platforms.protocol import PlatformAdapter
+from inkarms.platforms.adapters.protocol import PlatformAdapter
 from inkarms.platforms.router import MessageRouter
 from inkarms.platforms.processor import MessageProcessor
 from inkarms.platforms.session_mapper import get_session_mapper
