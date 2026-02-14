@@ -1,8 +1,11 @@
 """Platform adapter protocol definition."""
 
+from __future__ import annotations
+
+import asyncio
+import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
-from typing import Optional
 
 from inkarms.models.platforms import (
     IncomingMessage,
@@ -11,6 +14,8 @@ from inkarms.models.platforms import (
     PlatformType,
     StreamChunk,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class PlatformAdapter(ABC):
@@ -23,6 +28,7 @@ class PlatformAdapter(ABC):
     def __init__(self) -> None:
         """Initialize the platform adapter."""
         self._running = False
+        self._message_queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
 
     @property
     @abstractmethod
@@ -65,90 +71,77 @@ class PlatformAdapter(ABC):
         """
         ...
 
-    @abstractmethod
     async def receive_messages(self) -> AsyncIterator[IncomingMessage]:
-        """Receive messages from the platform.
+        """Receive messages from the platform via the internal queue.
+
+        Subclasses enqueue messages by calling ``self._message_queue.put()``.
 
         Yields:
             IncomingMessage objects as they arrive from the platform.
-
-        This is an async generator that should:
-        1. Listen for incoming messages from the platform
-        2. Convert platform-specific messages to IncomingMessage
-        3. Yield messages as they arrive
-        4. Handle platform-specific errors gracefully
         """
-        ...
+        while self._running:
+            try:
+                message = await asyncio.wait_for(self._message_queue.get(), timeout=1.0)
+                yield message
+            except TimeoutError:
+                continue
+            except Exception as e:
+                logger.error(f"Error receiving message: {e}", exc_info=True)
 
     @abstractmethod
     async def send_message(
         self,
-        user: str,  # Platform-specific user identifier
+        destination_id: str,
         message: OutgoingMessage,
     ) -> str:
-        """Send a message to a user on this platform.
+        """Send a message to a destination on this platform.
 
         Args:
-            user: Platform-specific user identifier (e.g., Telegram chat_id)
+            destination_id: Platform-specific identifier (chat_id, channel_id, etc.)
             message: The message to send
 
         Returns:
             Platform-specific message ID of the sent message
-
-        Raises:
-            Exception: If sending fails
         """
         ...
 
     @abstractmethod
     async def send_streaming_chunk(
         self,
-        user: str,
+        destination_id: str,
         chunk: StreamChunk,
-        message_id: Optional[str] = None,
+        message_id: str | None = None,
     ) -> str:
-        """Send a streaming chunk to a user.
-
-        For platforms that support message editing, this should update
-        an existing message. For platforms that don't, this should send
-        a new message or buffer chunks.
+        """Send a streaming chunk to a destination.
 
         Args:
-            user: Platform-specific user identifier
+            destination_id: Platform-specific identifier
             chunk: The streaming chunk to send
             message_id: Existing message ID to update (if supported)
 
         Returns:
             Message ID (new or existing)
-
-        Raises:
-            Exception: If sending fails
         """
         ...
 
     @abstractmethod
-    def format_output(self, content: str, format: str) -> str:
+    def format_output(self, content: str, output_format: str) -> str:
         """Format content for this platform.
-
-        Converts generic markdown/html to platform-specific formatting.
 
         Args:
             content: The content to format
-            format: The format type ("plain", "markdown", "html")
+            output_format: The format type ("plain", "markdown", "html")
 
         Returns:
             Platform-specific formatted content
         """
         ...
 
-    async def send_typing_indicator(self, user: str) -> None:
-        """Send typing indicator to user (if supported).
+    async def send_typing_indicator(self, destination_id: str) -> None:
+        """Send typing indicator (if supported).
 
         Args:
-            user: Platform-specific user identifier
-
-        Default implementation does nothing. Platforms that support
-        typing indicators should override this.
+            destination_id: Platform-specific identifier
         """
         pass
 

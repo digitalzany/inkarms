@@ -1,10 +1,11 @@
 """Rate limiting for platform messages."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
 import time
 from collections import defaultdict
-from typing import Optional
 
 from inkarms.models.platforms import PlatformType, PlatformUser
 
@@ -61,14 +62,14 @@ class RateLimiter:
         self._buckets: dict[str, tuple[float, float]] = {}
 
         # Platform limits: {platform: max_per_second}
-        self._platform_limits: dict[PlatformType, Optional[float]] = {}
+        self._platform_limits: dict[PlatformType, float | None] = {}
 
         # Platform counters: {platform: [(timestamp, count), ...]}
         self._platform_counters: dict[PlatformType, list[tuple[float, int]]] = defaultdict(list)
 
         self._lock = asyncio.Lock()
 
-    def set_platform_limit(self, platform: PlatformType, max_per_second: Optional[float]) -> None:
+    def set_platform_limit(self, platform: PlatformType, max_per_second: float | None) -> None:
         """Set rate limit for a specific platform.
 
         Args:
@@ -233,7 +234,7 @@ class RateLimiter:
 
 
 # Singleton instance
-_rate_limiter: Optional[RateLimiter] = None
+_rate_limiter: RateLimiter | None = None
 
 
 def get_rate_limiter(

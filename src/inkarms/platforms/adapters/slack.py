@@ -1,9 +1,8 @@
 """Slack bot platform adapter using Socket Mode."""
 
-import asyncio
+from __future__ import annotations
+
 import logging
-from collections.abc import AsyncIterator
-from typing import Optional
 
 from inkarms.models.platforms import (
     IncomingMessage,
@@ -18,11 +17,11 @@ from inkarms.platforms.adapters.protocol import PlatformAdapter
 logger = logging.getLogger(__name__)
 
 try:
-    from slack_sdk.web.async_client import AsyncWebClient
+    from slack_sdk.errors import SlackApiError
     from slack_sdk.socket_mode.aiohttp import SocketModeClient
     from slack_sdk.socket_mode.request import SocketModeRequest
     from slack_sdk.socket_mode.response import SocketModeResponse
-    from slack_sdk.errors import SlackApiError
+    from slack_sdk.web.async_client import AsyncWebClient
 
     SLACK_AVAILABLE = True
 except ImportError:
@@ -46,7 +45,7 @@ class SlackAdapter(PlatformAdapter):
         self,
         bot_token: str,
         app_token: str,
-        allowed_channels: Optional[list[str]] = None,
+        allowed_channels: list[str] | None = None,
     ):
         """Initialize Slack adapter.
 
@@ -67,34 +66,31 @@ class SlackAdapter(PlatformAdapter):
         self._app_token = app_token
         self._allowed_channels = set(allowed_channels) if allowed_channels else None
 
-        self._web_client: Optional[AsyncWebClient] = None
-        self._socket_client: Optional[SocketModeClient] = None
-        self._message_queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
-        self._bot_user_id: Optional[str] = None
+        self._web_client: AsyncWebClient | None = None
+        self._socket_client: SocketModeClient | None = None
+        self._bot_user_id: str | None = None
 
-        self._capabilities = PlatformCapabilities(
-            supports_streaming=True,  # Via message editing
-            supports_markdown=True,
-            supports_html=False,
-            supports_buttons=True,
-            supports_attachments=True,
-            supports_threads=True,
-            supports_reactions=True,
-            supports_typing_indicator=False,  # Slack doesn't have typing indicator
-            supports_message_editing=True,
-            markdown_flavor="mrkdwn",  # Slack's markdown variant
-            max_message_length=40000,  # Slack allows very long messages
-        )
+    CAPABILITIES = PlatformCapabilities(
+        supports_streaming=True,
+        supports_markdown=True,
+        supports_html=False,
+        supports_buttons=True,
+        supports_attachments=True,
+        supports_threads=True,
+        supports_reactions=True,
+        supports_typing_indicator=False,
+        supports_message_editing=True,
+        markdown_flavor="mrkdwn",
+        max_message_length=40000,
+    )
 
     @property
     def platform_type(self) -> PlatformType:
-        """The type of platform this adapter handles."""
         return PlatformType.SLACK
 
     @property
     def capabilities(self) -> PlatformCapabilities:
-        """The capabilities supported by this platform."""
-        return self._capabilities
+        return self.CAPABILITIES
 
     async def start(self) -> None:
         """Start the Slack bot with Socket Mode."""
@@ -231,55 +227,28 @@ class SlackAdapter(PlatformAdapter):
         # Queue message for processing
         await self._message_queue.put(incoming_msg)
 
-    async def receive_messages(self) -> AsyncIterator[IncomingMessage]:
-        """Receive messages from Slack.
-
-        Yields:
-            IncomingMessage objects as they arrive
-        """
-        while self._running:
-            try:
-                # Wait for message with timeout to allow checking _running
-                message = await asyncio.wait_for(
-                    self._message_queue.get(),
-                    timeout=1.0,
-                )
-                yield message
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                logger.error(f"Error receiving message: {e}", exc_info=True)
-
     async def send_message(
         self,
-        user: str,
+        destination_id: str,
         message: OutgoingMessage,
     ) -> str:
         """Send a message to a Slack channel.
 
         Args:
-            user: Channel ID (stored in metadata from incoming message)
+            destination_id: Channel ID
             message: The message to send
 
         Returns:
             Message timestamp (ts) of sent message
-
-        Raises:
-            SlackApiError: If sending fails
         """
         if not self._web_client:
             raise RuntimeError("Web client not initialized")
 
-        # Extract channel ID from metadata
-        channel_id = user
-
         try:
-            # Format content
             formatted_content = self.format_output(message.content, message.format)
 
-            # Send message
             response = await self._web_client.chat_postMessage(
-                channel=channel_id,
+                channel=destination_id,
                 text=formatted_content,
                 thread_ts=message.thread_id,  # Reply in thread if specified
             )
@@ -292,43 +261,27 @@ class SlackAdapter(PlatformAdapter):
 
     async def send_streaming_chunk(
         self,
-        user: str,
+        destination_id: str,
         chunk: StreamChunk,
-        message_id: Optional[str] = None,
+        message_id: str | None = None,
     ) -> str:
-        """Send a streaming chunk via message editing.
-
-        For the first chunk, creates a new message.
-        For subsequent chunks, edits the existing message.
-
-        Args:
-            user: Channel ID
-            chunk: The streaming chunk
-            message_id: Existing message timestamp to edit
-
-        Returns:
-            Message timestamp
-        """
+        """Send a streaming chunk via message editing."""
         if not self._web_client:
             raise RuntimeError("Web client not initialized")
 
-        channel_id = user
-
         try:
-            # Format content
             formatted_content = self.format_output(chunk.content, "markdown")
 
             if message_id is None:
-                # First chunk - send new message
                 response = await self._web_client.chat_postMessage(
-                    channel=channel_id,
+                    channel=destination_id,
                     text=formatted_content,
                 )
                 return response["ts"]
             else:
                 # Subsequent chunks - edit message
                 await self._web_client.chat_update(
-                    channel=channel_id,
+                    channel=destination_id,
                     ts=message_id,
                     text=formatted_content,
                 )
@@ -339,22 +292,22 @@ class SlackAdapter(PlatformAdapter):
             logger.debug(f"Failed to send streaming chunk: {e}")
             return message_id or ""
 
-    def format_output(self, content: str, format: str) -> str:
+    def format_output(self, content: str, output_format: str) -> str:
         """Format content for Slack.
 
         Converts markdown to Slack's mrkdwn format.
 
         Args:
             content: The content to format
-            format: The format type ("plain", "markdown", "html")
+            output_format: The format type ("plain", "markdown", "html")
 
         Returns:
             Slack-formatted content
         """
-        if format == "plain":
+        if output_format == "plain":
             return content
 
-        if format == "markdown":
+        if output_format == "markdown":
             # Slack uses mrkdwn which is similar but not identical to markdown
             # Key differences:
             # - Bold: **text** → *text*

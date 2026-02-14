@@ -18,6 +18,8 @@ from inkarms.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
+MAX_TOOL_OUTPUT_CHARS = 50_000
+
 
 @dataclass
 class AgentResult:
@@ -625,6 +627,21 @@ class AgentLoop:
         }
 
     @staticmethod
+    def _truncate_output(output: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:
+        """Truncate tool output to prevent context window exhaustion.
+
+        Keeps head and tail of output (most useful info tends to be there).
+        """
+        if len(output) <= max_chars:
+            return output
+        half = max_chars // 2
+        return (
+            output[:half]
+            + f"\n\n... [truncated {len(output) - max_chars} characters] ...\n\n"
+            + output[-half:]
+        )
+
+    @staticmethod
     def _add_tool_results_to_conversation(
         conversation: list[dict[str, Any]], tool_results: list[ToolResult]
     ) -> None:
@@ -639,6 +656,10 @@ class AgentLoop:
                 {
                     "role": "tool",
                     "tool_call_id": result.tool_call_id,
-                    "content": result.output if not result.is_error else (result.error or "Error"),
+                    "content": (
+                        AgentLoop._truncate_output(result.output)
+                        if not result.is_error
+                        else (result.error or "Error")
+                    ),
                 }
             )

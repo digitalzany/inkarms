@@ -3,7 +3,8 @@
 import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
-from inkarms.models.platforms import PlatformType
+from inkarms.models.agent import AgentEvent, EventType
+from inkarms.models.platforms import PlatformType, StreamChunk
 from inkarms.platforms.processor import MessageProcessor, ProcessedResponse
 from inkarms.providers import (
     AuthenticationError,
@@ -172,20 +173,61 @@ class TestMessageProcessor:
         assert messages[1].role == "user"
         assert messages[1].content == "Hello, bot!"
 
-    def test_build_messages_with_session(self, processor, mock_session_manager):
+    def test_build_messages_with_session(self, processor):
         """Test building messages with session tracking."""
-        with patch("inkarms.platforms.processor.get_session_manager",
-                  return_value=mock_session_manager):
+        processor._session_manager.get_messages = Mock(return_value=[])
+        processor._session_manager.set_system_prompt = Mock()
+        processor._session_manager.add_user_message = Mock()
 
-            messages = processor._build_messages(
-                query="Test query",
-                skills=[],
-                session_id="test_session_123",
-            )
+        messages = processor._build_messages(
+            query="Test query",
+            skills=[],
+            session_id="test_session_123",
+        )
 
-            # Session manager should be called
-            mock_session_manager.set_system_prompt.assert_called_once()
-            mock_session_manager.add_user_message.assert_called_once_with("Test query")
+        # Session manager should be called
+        processor._session_manager.get_messages.assert_called_once_with(include_system=False)
+        processor._session_manager.set_system_prompt.assert_called_once()
+        processor._session_manager.add_user_message.assert_called_once_with("Test query")
+
+    def test_build_messages_includes_prior_history(self, processor):
+        """Test that prior session history is included in messages."""
+        prior_turns = [
+            {"role": "user", "content": "Hello"},
+            {"role": "assistant", "content": "Hi there!"},
+        ]
+        processor._session_manager.get_messages = Mock(return_value=prior_turns)
+
+        messages = processor._build_messages(
+            query="Follow-up question",
+            skills=[],
+            session_id="test_session_123",
+        )
+
+        # system + 2 prior turns + current user query
+        assert len(messages) == 4
+        assert messages[0].role == "system"
+        assert messages[1].role == "user"
+        assert messages[1].content == "Hello"
+        assert messages[2].role == "assistant"
+        assert messages[2].content == "Hi there!"
+        assert messages[3].role == "user"
+        assert messages[3].content == "Follow-up question"
+
+    def test_build_messages_no_history_without_session_id(self, processor):
+        """Test that no history is loaded when session_id is None (CLI path)."""
+        processor._session_manager.get_messages = Mock(return_value=[])
+
+        messages = processor._build_messages(
+            query="Hello",
+            skills=[],
+            session_id=None,
+        )
+
+        # Should NOT call get_messages without a session_id
+        processor._session_manager.get_messages.assert_not_called()
+        # Should only have system + user
+        assert len(messages) == 2
 
     @pytest.mark.asyncio
     async def test_process_success(self, processor, mock_provider_manager):
@@ -441,3 +483,202 @@ class TestMessageProcessor:
 
         # Auto discovery should not be called
         mock_skill_manager.get_skills_for_query.assert_not_called()
+
+
+class TestPlatformEventCallback:
+    """Tests for _platform_event_callback used in platform startup."""
+
+    def test_callback_handles_tool_start(self):
+        """Event callback should not raise for TOOL_START events."""
+        from inkarms.cli.commands.platforms import _platform_event_callback
+
+        event = AgentEvent(
+            event_type=EventType.TOOL_START,
+            iteration=0,
+            tool_name="execute_bash",
+            message="Executing tool: execute_bash",
+        )
+        # Should not raise
+        _platform_event_callback(event)
+
+    def test_callback_handles_tool_complete(self):
+        """Event callback should not raise for TOOL_COMPLETE events."""
+        from inkarms.cli.commands.platforms import _platform_event_callback
+
+        event = AgentEvent(
+            event_type=EventType.TOOL_COMPLETE,
+            iteration=0,
+            tool_name="read_file",
+            message="Tool completed: read_file",
+        )
+        _platform_event_callback(event)
+
+    def test_callback_handles_tool_error(self):
+        """Event callback should not raise for TOOL_ERROR events."""
+        from inkarms.cli.commands.platforms import _platform_event_callback
+
+        event = AgentEvent(
+            event_type=EventType.TOOL_ERROR,
+            iteration=0,
+            tool_name="bash",
+            message="Tool failed: bash",
+        )
+        _platform_event_callback(event)
+
+    def test_callback_handles_iteration_start(self):
+        """Event callback should not raise for ITERATION_START events."""
+        from inkarms.cli.commands.platforms import _platform_event_callback
+
+        event = AgentEvent(
+            event_type=EventType.ITERATION_START,
+            iteration=0,
+            message="Starting iteration 1/10",
+        )
+        _platform_event_callback(event)
+
+    def test_callback_handles_agent_complete(self):
+        """Event callback should not raise for AGENT_COMPLETE events."""
+        from inkarms.cli.commands.platforms import _platform_event_callback
+
+        event = AgentEvent(
+            event_type=EventType.AGENT_COMPLETE,
+            iteration=2,
+            message="Agent completed after 3 iterations",
+        )
+        _platform_event_callback(event)
+
+    def test_callback_handles_unmatched_event(self):
+        """Event callback should not raise for unmatched event types."""
+        from inkarms.cli.commands.platforms import _platform_event_callback
+
+        event = AgentEvent(
+            event_type=EventType.AI_RESPONSE,
+            iteration=0,
+            message="AI response received",
+        )
+        # Should not raise even though it doesn't match any logged type
+        _platform_event_callback(event)
+
+
+class TestMessageProcessorCallbackWiring:
+    """Tests that MessageProcessor passes callbacks through to agents."""
+
+    def test_callbacks_stored_on_processor(self, mock_skill_manager):
+        """Callbacks passed to MessageProcessor should be stored."""
+        event_cb = Mock()
+        approval_cb = Mock(return_value=True)
+
+        with patch("inkarms.platforms.processor.get_config") as mock_get_config, \
+             patch("inkarms.platforms.processor.get_audit_logger"):
+            from inkarms.config.schema import Config, SystemPromptConfig, AgentConfigSchema
+
+            mock_config = Config(
+                system_prompt=SystemPromptConfig(personality="Test"),
+                agent=AgentConfigSchema(enable_tools=False),
+            )
+            mock_get_config.return_value = mock_config
+
+            proc = MessageProcessor(
+                skill_manager=mock_skill_manager,
+                event_callback=event_cb,
+                tool_approval_callback=approval_cb,
+            )
+
+            assert proc._event_callback is event_cb
+            assert proc._tool_approval_callback is approval_cb
+
+    def test_create_agent_passes_callbacks(self, mock_skill_manager):
+        """_create_agent should pass callbacks to AgentLoop."""
+        event_cb = Mock()
+        approval_cb = Mock(return_value=True)
+
+        with patch("inkarms.platforms.processor.get_config") as mock_get_config, \
+             patch("inkarms.platforms.processor.get_audit_logger"), \
+             patch("inkarms.platforms.processor.register_builtin_tools"):
+            from inkarms.config.schema import Config, SystemPromptConfig, AgentConfigSchema
+
+            mock_config = Config(
+                system_prompt=SystemPromptConfig(personality="Test"),
+                agent=AgentConfigSchema(enable_tools=True),
+            )
+            mock_get_config.return_value = mock_config
+
+            proc = MessageProcessor(
+                skill_manager=mock_skill_manager,
+                event_callback=event_cb,
+                tool_approval_callback=approval_cb,
+            )
+
+            mock_manager = Mock()
+            agent = proc._create_agent(mock_manager)
+
+            assert agent.event_callback is event_cb
+            assert agent.approval_callback is approval_cb
+
+
+class TestEventToStreamChunk:
+    """Tests for MessageProcessor._event_to_stream_chunk."""
+
+    def test_tool_start_returns_chunk(self):
+        """TOOL_START event should produce a progress chunk."""
+        event = AgentEvent(
+            event_type=EventType.TOOL_START,
+            iteration=0,
+            tool_name="execute_bash",
+            message="Executing tool",
+        )
+        chunk = MessageProcessor._event_to_stream_chunk(event)
+
+        assert chunk is not None
+        assert "execute_bash" in chunk.content
+        assert chunk.is_final is False
+        assert chunk.metadata.get("event_type") == EventType.TOOL_START
+
+    def test_tool_complete_returns_chunk(self):
+        """TOOL_COMPLETE event should produce a progress chunk."""
+        event = AgentEvent(
+            event_type=EventType.TOOL_COMPLETE,
+            iteration=0,
+            tool_name="read_file",
+            message="Tool completed",
+        )
+        chunk = MessageProcessor._event_to_stream_chunk(event)
+
+        assert chunk is not None
+        assert "read_file" in chunk.content
+        assert chunk.is_final is False
+
+    def test_tool_error_returns_chunk(self):
+        """TOOL_ERROR event should produce a progress chunk."""
+        event = AgentEvent(
+            event_type=EventType.TOOL_ERROR,
+            iteration=0,
+            tool_name="bash",
+            message="Tool error",
+        )
+        chunk = MessageProcessor._event_to_stream_chunk(event)
+
+        assert chunk is not None
+        assert "bash" in chunk.content
+
+    def test_ai_response_returns_none(self):
+        """AI_RESPONSE event should not produce a chunk."""
+        event = AgentEvent(
+            event_type=EventType.AI_RESPONSE,
+            iteration=0,
+            message="AI response received",
+        )
+        chunk = MessageProcessor._event_to_stream_chunk(event)
+
+        assert chunk is None
+
+    def test_iteration_start_returns_none(self):
+        """ITERATION_START event should not produce a chunk."""
+        event = AgentEvent(
+            event_type=EventType.ITERATION_START,
+            iteration=0,
+            message="Starting iteration",
+        )
+        chunk = MessageProcessor._event_to_stream_chunk(event)
+
+        assert chunk is None

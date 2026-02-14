@@ -1,9 +1,8 @@
 """Telegram bot platform adapter using long polling."""
 
-import asyncio
+from __future__ import annotations
+
 import logging
-from collections.abc import AsyncIterator
-from typing import Optional
 
 from inkarms.models.platforms import (
     IncomingMessage,
@@ -14,16 +13,15 @@ from inkarms.models.platforms import (
     StreamChunk,
 )
 from inkarms.platforms.adapters.protocol import PlatformAdapter
+from inkarms.platforms.formatting import markdown_to_telegram_html
 
 logger = logging.getLogger(__name__)
 
 try:
     from telegram import Bot, Update
-    from telegram.ext import Application, MessageHandler, filters
-    from telegram.constants import ParseMode, ChatAction
+    from telegram.constants import ChatAction, ParseMode
     from telegram.error import TelegramError
-    from telegram.helpers import escape_markdown
-
+    from telegram.ext import Application, MessageHandler, filters
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
@@ -49,8 +47,8 @@ class TelegramAdapter(PlatformAdapter):
     def __init__(
         self,
         bot_token: str,
-        allowed_users: Optional[list[str]] = None,
-        parse_mode: str = "MarkdownV2",
+        allowed_users: list[str] | None = None,
+        parse_mode: str = "HTML",
         polling_interval: int = 2,
     ):
         """Initialize Telegram adapter.
@@ -74,33 +72,30 @@ class TelegramAdapter(PlatformAdapter):
         self._parse_mode = parse_mode
         self._polling_interval = polling_interval
 
-        self._application: Optional[Application] = None
-        self._message_queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
-        self._bot: Optional[Bot] = None
+        self._application: Application | None = None
+        self._bot: Bot | None = None
 
-        self._capabilities = PlatformCapabilities(
-            supports_streaming=True,  # Via message editing
-            supports_markdown=True,
-            supports_html=True,
-            supports_buttons=True,
-            supports_attachments=True,
-            supports_threads=False,
-            supports_reactions=False,
-            supports_typing_indicator=True,
-            supports_message_editing=True,
-            markdown_flavor="MarkdownV2",
-            max_message_length=4096,
-        )
+    CAPABILITIES = PlatformCapabilities(
+        supports_streaming=True,
+        supports_markdown=True,
+        supports_html=True,
+        supports_buttons=True,
+        supports_attachments=True,
+        supports_threads=False,
+        supports_reactions=False,
+        supports_typing_indicator=True,
+        supports_message_editing=True,
+        markdown_flavor="HTML",
+        max_message_length=4096,
+    )
 
     @property
     def platform_type(self) -> PlatformType:
-        """The type of platform this adapter handles."""
         return PlatformType.TELEGRAM
 
     @property
     def capabilities(self) -> PlatformCapabilities:
-        """The capabilities supported by this platform."""
-        return self._capabilities
+        return self.CAPABILITIES
 
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
@@ -197,67 +192,54 @@ class TelegramAdapter(PlatformAdapter):
         # Queue message for processing
         await self._message_queue.put(incoming_msg)
 
-    async def receive_messages(self) -> AsyncIterator[IncomingMessage]:
-        """Receive messages from Telegram.
-
-        Yields:
-            IncomingMessage objects as they arrive
-        """
-        while self._running:
-            try:
-                # Wait for message with timeout to allow checking _running
-                message = await asyncio.wait_for(
-                    self._message_queue.get(),
-                    timeout=1.0,
-                )
-                yield message
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                logger.error(f"Error receiving message: {e}", exc_info=True)
-
     async def send_message(
         self,
-        user: str,
+        destination_id: str,
         message: OutgoingMessage,
     ) -> str:
-        """Send a message to a Telegram user.
+        """Send a message to a Telegram chat.
 
         Args:
-            user: Chat ID (stored in metadata from incoming message)
+            destination_id: Chat ID
             message: The message to send
 
         Returns:
             Message ID of sent message
-
-        Raises:
-            TelegramError: If sending fails
         """
         if not self._bot:
             raise RuntimeError("Bot not initialized")
 
         try:
-            # Format content
             formatted_content = self.format_output(message.content, message.format)
 
-            # Determine parse mode
             parse_mode = None
-            if message.format == "markdown":
-                parse_mode = ParseMode.MARKDOWN_V2
-            elif message.format == "html":
+            if message.format in ("markdown", "html"):
                 parse_mode = ParseMode.HTML
 
-            # Send message
-            sent_message = await self._bot.send_message(
-                chat_id=user,
-                text=formatted_content,
-                parse_mode=parse_mode,
-                reply_to_message_id=(
-                    int(message.reply_to_message_id)
-                    if message.reply_to_message_id
-                    else None
-                ),
+            reply_to = (
+                int(message.reply_to_message_id)
+                if message.reply_to_message_id
+                else None
             )
+
+            try:
+                sent_message = await self._bot.send_message(
+                    chat_id=destination_id,
+                    text=formatted_content,
+                    parse_mode=parse_mode,
+                    reply_to_message_id=reply_to,
+                )
+            except TelegramError as parse_err:
+                if "can't parse entities" in str(parse_err).lower():
+                    logger.warning("HTML parse failed, retrying as plain text")
+                    sent_message = await self._bot.send_message(
+                        chat_id=destination_id,
+                        text=message.content,
+                        parse_mode=None,
+                        reply_to_message_id=reply_to,
+                    )
+                else:
+                    raise
 
             return str(sent_message.message_id)
 
@@ -267,46 +249,52 @@ class TelegramAdapter(PlatformAdapter):
 
     async def send_streaming_chunk(
         self,
-        user: str,
+        destination_id: str,
         chunk: StreamChunk,
-        message_id: Optional[str] = None,
+        message_id: str | None = None,
     ) -> str:
-        """Send a streaming chunk via message editing.
-
-        For the first chunk, creates a new message.
-        For subsequent chunks, edits the existing message.
-
-        Args:
-            user: Chat ID
-            chunk: The streaming chunk
-            message_id: Existing message ID to edit
-
-        Returns:
-            Message ID
-        """
+        """Send a streaming chunk via message editing."""
         if not self._bot:
             raise RuntimeError("Bot not initialized")
 
         try:
-            # Format content
             formatted_content = self.format_output(chunk.content, "markdown")
 
             if message_id is None:
-                # First chunk - send new message
-                sent_message = await self._bot.send_message(
-                    chat_id=user,
-                    text=formatted_content,
-                    parse_mode=ParseMode.MARKDOWN_V2,
-                )
+                try:
+                    sent_message = await self._bot.send_message(
+                        chat_id=destination_id,
+                        text=formatted_content,
+                        parse_mode=ParseMode.HTML,
+                    )
+                except TelegramError as parse_err:
+                    if "can't parse entities" in str(parse_err).lower():
+                        sent_message = await self._bot.send_message(
+                            chat_id=destination_id,
+                            text=chunk.content,
+                            parse_mode=None,
+                        )
+                    else:
+                        raise
                 return str(sent_message.message_id)
             else:
-                # Subsequent chunks - edit message
-                await self._bot.edit_message_text(
-                    chat_id=user,
-                    message_id=int(message_id),
-                    text=formatted_content,
-                    parse_mode=ParseMode.MARKDOWN_V2,
-                )
+                try:
+                    await self._bot.edit_message_text(
+                        chat_id=destination_id,
+                        message_id=int(message_id),
+                        text=formatted_content,
+                        parse_mode=ParseMode.HTML,
+                    )
+                except TelegramError as parse_err:
+                    if "can't parse entities" in str(parse_err).lower():
+                        await self._bot.edit_message_text(
+                            chat_id=destination_id,
+                            message_id=int(message_id),
+                            text=chunk.content,
+                            parse_mode=None,
+                        )
+                    else:
+                        raise
                 return message_id
 
         except TelegramError as e:
@@ -315,42 +303,40 @@ class TelegramAdapter(PlatformAdapter):
                 logger.error(f"Failed to send streaming chunk: {e}")
             return message_id or ""
 
-    async def send_typing_indicator(self, user: str) -> None:
-        """Send typing indicator to user.
-
-        Args:
-            user: Chat ID
-        """
+    async def send_typing_indicator(self, destination_id: str) -> None:
+        """Send typing indicator."""
         if not self._bot:
             return
 
         try:
             await self._bot.send_chat_action(
-                chat_id=user,
+                chat_id=destination_id,
                 action=ChatAction.TYPING,
             )
         except TelegramError as e:
             logger.debug(f"Failed to send typing indicator: {e}")
 
-    def format_output(self, content: str, format: str) -> str:
+    def format_output(self, content: str, output_format: str) -> str:
         """Format content for Telegram.
 
-        Escapes special characters for MarkdownV2 if needed.
+        Converts standard Markdown to Telegram-compatible HTML.
 
         Args:
             content: The content to format
-            format: The format type ("plain", "markdown", "html")
+            output_format: The format type ("plain", "markdown", "html")
 
         Returns:
             Telegram-formatted content
         """
-        if format == "plain":
+        if output_format == "plain":
             return content
 
-        if format == "markdown" and self._parse_mode == "MarkdownV2":
-            # For MarkdownV2, certain characters need escaping
-            # This is a simplified version - full implementation would be more complex
-            return escape_markdown(content, version=2)
+        if output_format == "markdown":
+            try:
+                return markdown_to_telegram_html(content)
+            except Exception:
+                logger.warning("Markdown to HTML conversion failed, using plain text")
+                return content
 
         return content
 

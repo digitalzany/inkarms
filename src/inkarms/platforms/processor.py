@@ -4,11 +4,13 @@ This module bridges platform adapters to the core InkArms components
 (ProviderManager, SessionManager, SkillManager, ToolRegistry) without platform-specific logic.
 """
 
+import asyncio
 import logging
-from collections.abc import AsyncIterator
-from typing import Callable, Optional
+from collections.abc import AsyncIterator, Callable
 
-from inkarms.agent import AgentConfig, AgentEvent, AgentLoop, ApprovalMode
+from pydantic import BaseModel
+
+from inkarms.agent import AgentConfig, AgentEvent, AgentLoop, ApprovalMode, EventType
 from inkarms.audit import get_audit_logger
 from inkarms.config import get_config
 from inkarms.memory import get_session_manager
@@ -29,32 +31,19 @@ from inkarms.tools.registry import ToolRegistry
 logger = logging.getLogger(__name__)
 
 
-class ProcessedResponse:
+class ProcessedResponse(BaseModel):
     """Response from message processing."""
 
-    def __init__(
-        self,
-        content: str,
-        model: str,
-        provider: str,
-        input_tokens: int,
-        output_tokens: int,
-        cost: float,
-        finish_reason: str,
-        error: Optional[str] = None,
-        tools_used: int = 0,
-        iterations: int = 1,
-    ):
-        self.content = content
-        self.model = model
-        self.provider = provider
-        self.input_tokens = input_tokens
-        self.output_tokens = output_tokens
-        self.cost = cost
-        self.finish_reason = finish_reason
-        self.error = error
-        self.tools_used = tools_used
-        self.iterations = iterations
+    content: str
+    model: str
+    provider: str
+    input_tokens: int
+    output_tokens: int
+    cost: float
+    finish_reason: str
+    error: str | None = None
+    tools_used: int = 0
+    iterations: int = 1
 
 
 class MessageProcessor:
@@ -71,9 +60,9 @@ class MessageProcessor:
 
     def __init__(
         self,
-        skill_manager: Optional[SkillManager] = None,
-        event_callback: Optional[Callable[[AgentEvent], None]] = None,
-        tool_approval_callback: Optional[Callable] = None,
+        skill_manager: SkillManager | None = None,
+        event_callback: Callable[[AgentEvent], None] | None = None,
+        tool_approval_callback: Callable | None = None,
     ):
         """Initialize the message processor.
 
@@ -90,28 +79,19 @@ class MessageProcessor:
         self._tool_approval_callback = tool_approval_callback
 
         # Initialize tool registry with built-in tools
-        self._tool_registry: Optional[ToolRegistry] = None
+        self._tool_registry: ToolRegistry | None = None
         if self._config.agent.enable_tools:
             self._tool_registry = ToolRegistry()
             sandbox = SandboxExecutor.from_config(self._config.security)
             register_builtin_tools(self._tool_registry, sandbox)
 
     def _build_system_prompt(self, skills: list[Skill]) -> str:
-        """Build system prompt with personality and skills.
-
-        Args:
-            skills: List of skills to inject
-
-        Returns:
-            Combined system prompt
-        """
+        """Build system prompt with personality and skills."""
         parts = []
 
-        # Add personality if configured
         if self._config.system_prompt.personality:
             parts.append(self._config.system_prompt.personality)
 
-        # Add skill instructions
         if skills:
             parts.append("# Active Skills\n")
             for skill in skills:
@@ -124,26 +104,23 @@ class MessageProcessor:
         self,
         query: str,
         skills: list[Skill],
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
     ) -> list[Message]:
-        """Build message list for completion.
-
-        Args:
-            query: User query
-            skills: List of skills to inject
-            session_id: Optional session ID for context
-
-        Returns:
-            List of messages ready for completion
-        """
+        """Build message list for completion."""
         messages: list[Message] = []
 
-        # Build system prompt
         system_prompt = self._build_system_prompt(skills)
         if system_prompt:
             messages.append(Message.system(system_prompt))
 
-        # Get session manager if tracking context
+        # Load prior conversation history for platform sessions
+        if session_id and self._session_manager:
+            try:
+                for prior_msg in self._session_manager.get_messages(include_system=False):
+                    messages.append(Message(role=prior_msg["role"], content=prior_msg["content"]))
+            except Exception as e:
+                logger.error(f"Failed to load session history: {e}")
+
         if session_id:
             try:
                 if system_prompt:
@@ -151,7 +128,6 @@ class MessageProcessor:
             except Exception as e:
                 logger.error(f"Failed to get session manager: {e}")
 
-        # Add user query
         messages.append(Message.user(query))
         if self._session_manager:
             try:
@@ -161,23 +137,192 @@ class MessageProcessor:
 
         return messages
 
+    def _make_error_response(self, error_msg: str) -> ProcessedResponse:
+        """Create an error ProcessedResponse."""
+        return ProcessedResponse(
+            content="",
+            model="",
+            provider="",
+            input_tokens=0,
+            output_tokens=0,
+            cost=0.0,
+            finish_reason="error",
+            error=error_msg,
+        )
+
+    def _log_incoming(
+        self,
+        query: str,
+        platform: PlatformType,
+        platform_user_id: str | None,
+        platform_username: str | None,
+        session_id: str | None,
+    ) -> None:
+        """Log an incoming platform message."""
+        if platform != PlatformType.CLI and platform_user_id:
+            self._audit_logger.log_platform_message_received(
+                platform=platform.value,
+                user_id=platform_user_id,
+                username=platform_username,
+                message=query,
+                session_id=session_id,
+            )
+        else:
+            self._audit_logger.log_query(query, platform=platform.value, session_id=session_id)
+
+    def _log_outgoing(
+        self,
+        response_text: str,
+        platform: PlatformType,
+        platform_user_id: str | None,
+        session_id: str | None,
+        tokens: int,
+        cost: float,
+    ) -> None:
+        """Log an outgoing platform response."""
+        if platform != PlatformType.CLI and platform_user_id:
+            self._audit_logger.log_platform_message_sent(
+                platform=platform.value,
+                user_id=platform_user_id,
+                response=response_text,
+                session_id=session_id,
+                tokens=tokens,
+                cost=cost,
+            )
+        else:
+            self._audit_logger.log_query(
+                response_text,
+                platform=platform.value,
+                session_id=session_id,
+                metadata={"type": "response"},
+            )
+
+    def _track_response(
+        self,
+        session_id: str | None,
+        text: str,
+        model: str,
+        cost: float,
+    ) -> None:
+        """Track assistant response in session manager."""
+        if session_id:
+            try:
+                self._session_manager.add_assistant_message(text, model=model, cost=cost)
+            except Exception as e:
+                logger.error(f"Failed to track response in session: {e}")
+
+    def _create_agent(self, manager) -> AgentLoop:
+        """Create an AgentLoop with current config."""
+        agent_config = AgentConfig(
+            approval_mode=ApprovalMode(self._config.agent.approval_mode),
+            max_iterations=self._config.agent.max_iterations,
+            timeout_per_iteration=self._config.agent.timeout_per_iteration,
+            enable_tools=True,
+            allowed_tools=self._config.agent.allowed_tools,
+            blocked_tools=self._config.agent.blocked_tools,
+        )
+        return AgentLoop(
+            provider_manager=manager,
+            tool_registry=self._tool_registry,
+            config=agent_config,
+            approval_callback=self._tool_approval_callback,
+            event_callback=self._event_callback,
+        )
+
+    @staticmethod
+    def _event_to_stream_chunk(event: AgentEvent) -> StreamChunk | None:
+        """Convert an agent event to a progress stream chunk."""
+        formatters = {
+            EventType.TOOL_START: lambda e: f"Running tool: {e.tool_name}...",
+            EventType.TOOL_COMPLETE: lambda e: f"Tool completed: {e.tool_name}",
+            EventType.TOOL_ERROR: lambda e: f"Tool error: {e.tool_name}",
+        }
+        formatter = formatters.get(event.event_type)
+        if not formatter:
+            return None
+        return StreamChunk(
+            content=formatter(event),
+            is_final=False,
+            metadata={"event_type": event.event_type, "tool_name": event.tool_name},
+        )
+
+    async def _stream_agent_loop(
+        self,
+        manager,
+        messages,
+        model,
+        session_id,
+        platform,
+        platform_user_id,
+    ) -> AsyncIterator[StreamChunk]:
+        """Run agent loop and yield progress chunks as events arrive."""
+        try:
+            event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
+
+            def _queue_event(event: AgentEvent) -> None:
+                event_queue.put_nowait(event)
+                if self._event_callback:
+                    self._event_callback(event)
+
+            agent = self._create_agent(manager)
+            agent.event_callback = _queue_event
+            message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
+
+            agent_task = asyncio.create_task(agent.run(message_dicts, model=model))
+
+            while not agent_task.done():
+                try:
+                    event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
+                    chunk = self._event_to_stream_chunk(event)
+                    if chunk:
+                        yield chunk
+                except TimeoutError:
+                    continue
+
+            # Drain remaining events
+            while not event_queue.empty():
+                event = event_queue.get_nowait()
+                chunk = self._event_to_stream_chunk(event)
+                if chunk:
+                    yield chunk
+
+            result = agent_task.result()
+            yield StreamChunk(content=result.final_response, is_final=True)
+
+            summary = manager.get_cost_summary()
+            self._track_response(
+                session_id, result.final_response,
+                self._session_manager.model or "unknown",
+                summary.total_cost if summary else 0.0,
+            )
+            self._log_outgoing(
+                result.final_response, platform, platform_user_id, session_id,
+                self._session_total_tokens(),
+                summary.total_cost if summary else 0.0,
+            )
+        except Exception as e:
+            logger.error(f"Agent loop error: {e}", exc_info=True)
+            yield StreamChunk(content=f"Error: Agent loop error: {e}", is_final=True)
+
+    def _session_total_tokens(self) -> int:
+        """Get total tokens from session metadata, or 0."""
+        meta = self._session_manager.session.metadata
+        return meta.total_tokens if meta else 0
+
     async def process(
         self,
         query: str,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         platform: PlatformType = PlatformType.CLI,
-        platform_user_id: Optional[str] = None,
-        platform_username: Optional[str] = None,
-        model: Optional[str] = None,
-        skill_names: Optional[list[str]] = None,
+        platform_user_id: str | None = None,
+        platform_username: str | None = None,
+        model: str | None = None,
+        skill_names: list[str] | None = None,
         auto_skills: bool = False,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> ProcessedResponse:
         """Process a message and return non-streaming response.
-
-        When tools are enabled, uses AgentLoop for multi-turn tool execution
-        with streaming events. When tools are disabled, uses direct ProviderManager.
 
         Args:
             query: User query
@@ -193,108 +338,37 @@ class MessageProcessor:
 
         Returns:
             ProcessedResponse with completion result
-
-        Raises:
-            ProviderError: If completion fails
         """
-        # Log incoming platform message
-        if platform != PlatformType.CLI and platform_user_id:
-            self._audit_logger.log_platform_message_received(
-                platform=platform.value,
-                user_id=platform_user_id,
-                username=platform_username,
-                message=query,
-                session_id=session_id,
-            )
-        else:
-            # Fall back to generic query logging for CLI
-            self._audit_logger.log_query(query, platform=platform.value, session_id=session_id)
+        self._log_incoming(query, platform, platform_user_id, platform_username, session_id)
 
-        # Load skills
         skills = await self._load_skills(query, skill_names, auto_skills)
-
-        # Build messages
         messages = self._build_messages(query, skills, session_id)
-
         self._session_manager.set_model(model)
 
-        # Get provider manager
         try:
             manager = get_provider_manager()
         except Exception as e:
             logger.error(f"Failed to initialize provider: {e}")
-            return ProcessedResponse(
-                content="",
-                model="",
-                provider="",
-                input_tokens=0,
-                output_tokens=0,
-                cost=0.0,
-                finish_reason="error",
-                error=f"Failed to initialize provider: {e}",
-            )
+            return self._make_error_response(f"Failed to initialize provider: {e}")
 
-        # If tools enabled, use AgentLoop for tool execution
+        # Agent loop path (tools enabled)
         if self._config.agent.enable_tools and self._tool_registry:
             try:
-                # Create agent config
-                agent_config = AgentConfig(
-                    approval_mode=ApprovalMode(self._config.agent.approval_mode),
-                    max_iterations=self._config.agent.max_iterations,
-                    timeout_per_iteration=self._config.agent.timeout_per_iteration,
-                    enable_tools=True,
-                    allowed_tools=self._config.agent.allowed_tools,
-                    blocked_tools=self._config.agent.blocked_tools,
-                )
-
-                # Create agent loop with event streaming
-                agent = AgentLoop(
-                    provider_manager=manager,
-                    tool_registry=self._tool_registry,
-                    config=agent_config,
-                    approval_callback=self._tool_approval_callback,
-                    event_callback=self._event_callback,
-                )
-
-                # Convert to dict format for AgentLoop
+                agent = self._create_agent(manager)
                 message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
-
-                # Run agent loop
                 result = await agent.run(message_dicts, model=model)
-
-                # Get cost summary from provider manager
                 summary = manager.get_cost_summary()
 
-                # Track in session if enabled
-                if session_id:
-                    try:
-                        self._session_manager.add_assistant_message(
-                            result.final_response,
-                            model=self._session_manager.model or "unknown",
-                            cost=summary.total_cost if summary else 0.0,
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to track response in session: {e}")
-
-                # Log response
-                total_tokens = self._session_manager.session.metadata.total_tokens if self._session_manager.session.metadata else 0
-                if platform != PlatformType.CLI and platform_user_id:
-                    self._audit_logger.log_platform_message_sent(
-                        platform=platform.value,
-                        user_id=platform_user_id,
-                        response=result.final_response,
-                        session_id=session_id,
-                        tokens=total_tokens,
-                        cost=summary.total_cost if summary else 0.0,
-                    )
-                else:
-                    # Fall back to generic query logging for CLI
-                    self._audit_logger.log_query(
-                        result.final_response,
-                        platform=platform.value,
-                        session_id=session_id,
-                        metadata={"type": "response"},
-                    )
+                self._track_response(
+                    session_id, result.final_response,
+                    self._session_manager.model or "unknown",
+                    summary.total_cost if summary else 0.0,
+                )
+                self._log_outgoing(
+                    result.final_response, platform, platform_user_id, session_id,
+                    self._session_total_tokens(),
+                    summary.total_cost if summary else 0.0,
+                )
 
                 return ProcessedResponse(
                     content=result.final_response,
@@ -308,62 +382,25 @@ class MessageProcessor:
                     tools_used=len(result.tool_calls_made),
                     iterations=result.iterations,
                 )
-
             except Exception as e:
                 logger.error(f"Agent loop error: {e}", exc_info=True)
-                return ProcessedResponse(
-                    content="",
-                    model="",
-                    provider="",
-                    input_tokens=0,
-                    output_tokens=0,
-                    cost=0.0,
-                    finish_reason="error",
-                    error=f"Agent loop error: {e}",
-                )
+                return self._make_error_response(f"Agent loop error: {e}")
 
-        # Fallback: Use direct ProviderManager completion (no tools)
+        # Direct provider path (no tools)
         try:
             response = await manager.complete(
-                messages,
-                model=model,
-                stream=False,
-                temperature=temperature,
-                max_tokens=max_tokens,
+                messages, model=model, stream=False,
+                temperature=temperature, max_tokens=max_tokens,
             )
-
             assert isinstance(response, CompletionResponse)
 
-            # Track in session if enabled
-            if session_id:
-                try:
-                    self._session_manager.add_assistant_message(
-                        response.content,
-                        model=response.model,
-                        cost=response.cost,
-                    )
-                except Exception as e:
-                    logger.error(f"Failed to track response in session: {e}")
+            self._track_response(session_id, response.content, response.model, response.cost)
 
-            # Log response
             total_tokens = response.usage.input_tokens + response.usage.output_tokens
-            if platform != PlatformType.CLI and platform_user_id:
-                self._audit_logger.log_platform_message_sent(
-                    platform=platform.value,
-                    user_id=platform_user_id,
-                    response=response.content,
-                    session_id=session_id,
-                    tokens=total_tokens,
-                    cost=response.cost,
-                )
-            else:
-                # Fall back to generic query logging for CLI
-                self._audit_logger.log_query(
-                    response.content,
-                    platform=platform.value,
-                    session_id=session_id,
-                    metadata={"type": "response"},
-                )
+            self._log_outgoing(
+                response.content, platform, platform_user_id, session_id,
+                total_tokens, response.cost,
+            )
 
             return ProcessedResponse(
                 content=response.content,
@@ -377,61 +414,25 @@ class MessageProcessor:
 
         except AuthenticationError as e:
             logger.error(f"Authentication failed: {e}")
-            return ProcessedResponse(
-                content="",
-                model="",
-                provider="",
-                input_tokens=0,
-                output_tokens=0,
-                cost=0.0,
-                finish_reason="error",
-                error=f"Authentication failed: {e}",
-            )
-
-        except AllProvidersFailedError as e:
-            logger.error(f"All providers failed: {e}")
-            return ProcessedResponse(
-                content="",
-                model="",
-                provider="",
-                input_tokens=0,
-                output_tokens=0,
-                cost=0.0,
-                finish_reason="error",
-                error=f"All providers failed: {e}",
-            )
-
-        except ProviderError as e:
+            return self._make_error_response(f"Authentication failed: {e}")
+        except (AllProvidersFailedError, ProviderError) as e:
             logger.error(f"Provider error: {e}")
-            return ProcessedResponse(
-                content="",
-                model="",
-                provider="",
-                input_tokens=0,
-                output_tokens=0,
-                cost=0.0,
-                finish_reason="error",
-                error=f"Provider error: {e}",
-            )
+            return self._make_error_response(f"Provider error: {e}")
 
     async def process_streaming(
         self,
         query: str,
-        session_id: Optional[str] = None,
+        session_id: str | None = None,
         platform: PlatformType = PlatformType.CLI,
-        platform_user_id: Optional[str] = None,
-        platform_username: Optional[str] = None,
-        model: Optional[str] = None,
-        skill_names: Optional[list[str]] = None,
+        platform_user_id: str | None = None,
+        platform_username: str | None = None,
+        model: str | None = None,
+        skill_names: list[str] | None = None,
         auto_skills: bool = False,
         temperature: float = 0.7,
-        max_tokens: Optional[int] = None,
+        max_tokens: int | None = None,
     ) -> AsyncIterator[StreamChunk]:
         """Process a message and return streaming response.
-
-        When tools are enabled, runs AgentLoop and yields final response.
-        Tool execution events are streamed via event_callback (set during init).
-        When tools are disabled, streams AI response chunks directly.
 
         Args:
             query: User query
@@ -447,32 +448,13 @@ class MessageProcessor:
 
         Yields:
             StreamChunk objects with response content
-
-        Raises:
-            ProviderError: If completion fails
         """
-        # Log incoming platform message
-        if platform != PlatformType.CLI and platform_user_id:
-            self._audit_logger.log_platform_message_received(
-                platform=platform.value,
-                user_id=platform_user_id,
-                username=platform_username,
-                message=query,
-                session_id=session_id,
-            )
-        else:
-            # Fall back to generic query logging for CLI
-            self._audit_logger.log_query(query, platform=platform.value, session_id=session_id)
+        self._log_incoming(query, platform, platform_user_id, platform_username, session_id)
 
-        # Load skills
         skills = await self._load_skills(query, skill_names, auto_skills)
-
-        # Build messages
         messages = self._build_messages(query, skills, session_id)
-
         self._session_manager.set_model(model)
 
-        # Get provider manager
         try:
             manager = get_provider_manager()
         except Exception as e:
@@ -482,140 +464,51 @@ class MessageProcessor:
             )
             return
 
-        # If tools enabled, use AgentLoop (events streamed via callback)
+        # Agent loop path (tools enabled)
         if self._config.agent.enable_tools and self._tool_registry:
-            try:
-                # Create agent config
-                agent_config = AgentConfig(
-                    approval_mode=ApprovalMode(self._config.agent.approval_mode),
-                    max_iterations=self._config.agent.max_iterations,
-                    timeout_per_iteration=self._config.agent.timeout_per_iteration,
-                    enable_tools=True,
-                    allowed_tools=self._config.agent.allowed_tools,
-                    blocked_tools=self._config.agent.blocked_tools,
-                )
-
-                # Create agent loop with event streaming
-                # Note: Tool execution events are streamed via self._event_callback
-                agent = AgentLoop(
-                    provider_manager=manager,
-                    tool_registry=self._tool_registry,
-                    config=agent_config,
-                    approval_callback=self._tool_approval_callback,
-                    event_callback=self._event_callback,
-                )
-
-                # Convert to dict format for AgentLoop
-                message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
-
-                # Run agent loop (tool events streamed via callback)
-                result = await agent.run(message_dicts, model=model)
-
-                # Yield final response
-                yield StreamChunk(content=result.final_response, is_final=True)
-
-                # Get cost summary
-                summary = manager.get_cost_summary()
-
-                # Track in session if enabled
-                if session_id:
-                    try:
-                        self._session_manager.add_assistant_message(
-                            result.final_response,
-                            model=self._session_manager.model or "unknown",
-                            cost=summary.total_cost if summary else 0.0,
-                        )
-                    except Exception as e:
-                        logger.error(f"Failed to track response in session: {e}")
-
-                # Log response
-                total_tokens = self._session_manager.session.metadata.total_tokens if self._session_manager.session.metadata else 0
-                if platform != PlatformType.CLI and platform_user_id:
-                    self._audit_logger.log_platform_message_sent(
-                        platform=platform.value,
-                        user_id=platform_user_id,
-                        response=result.final_response,
-                        session_id=session_id,
-                        tokens=total_tokens,
-                        cost=summary.total_cost if summary else 0.0,
-                    )
-                else:
-                    # Fall back to generic query logging for CLI
-                    self._audit_logger.log_query(
-                        result.final_response,
-                        platform=platform.value,
-                        session_id=session_id,
-                        metadata={"type": "response"},
-                    )
-
-            except Exception as e:
-                logger.error(f"Agent loop error: {e}", exc_info=True)
-                yield StreamChunk(content=f"Error: Agent loop error: {e}", is_final=True)
-
+            async for chunk in self._stream_agent_loop(
+                manager, messages, model, session_id, platform, platform_user_id,
+            ):
+                yield chunk
             return
 
-        # Fallback: Perform streaming completion (no tools)
+        # Direct streaming path (no tools)
         try:
             response_text = ""
             stream_response = await manager.complete(
-                messages,
-                model=model,
-                stream=True,
-                temperature=temperature,
-                max_tokens=max_tokens,
+                messages, model=model, stream=True,
+                temperature=temperature, max_tokens=max_tokens,
             )
 
             async for chunk in stream_response:  # type: ignore
                 response_text += chunk.content
                 yield StreamChunk(content=response_text, is_final=False)
 
-            # Final chunk
             yield StreamChunk(content=response_text, is_final=True)
 
-            # Track in session if enabled
             if session_id:
                 try:
                     summary = manager.get_cost_summary()
                     resolved_model = manager.resolve_model(model)
                     self._session_manager.add_assistant_message(
-                        response_text,
-                        model=resolved_model,
-                        cost=summary.total_cost,
+                        response_text, model=resolved_model, cost=summary.total_cost,
                     )
                 except Exception as e:
                     logger.error(f"Failed to track response in session: {e}")
 
-            # Log response
-            if platform != PlatformType.CLI and platform_user_id:
-                # Get summary for tokens and cost
-                summary = manager.get_cost_summary()
-                total_tokens = self._session_manager.session.metadata.total_tokens if self._session_manager.session.metadata else 0
-                total_cost = summary.total_cost if summary else 0.0
-                self._audit_logger.log_platform_message_sent(
-                    platform=platform.value,
-                    user_id=platform_user_id,
-                    response=response_text,
-                    session_id=session_id,
-                    tokens=total_tokens,
-                    cost=total_cost,
-                )
-            else:
-                # Fall back to generic query logging for CLI
-                self._audit_logger.log_query(
-                    response_text,
-                    platform=platform.value,
-                    session_id=session_id,
-                    metadata={"type": "response"},
-                )
+            summary = manager.get_cost_summary()
+            self._log_outgoing(
+                response_text, platform, platform_user_id, session_id,
+                self._session_total_tokens(),
+                summary.total_cost if summary else 0.0,
+            )
 
         except AuthenticationError as e:
             logger.error(f"Authentication failed: {e}")
             yield StreamChunk(content=f"Error: Authentication failed: {e}", is_final=True)
-
         except AllProvidersFailedError as e:
             logger.error(f"All providers failed: {e}")
             yield StreamChunk(content=f"Error: All providers failed: {e}", is_final=True)
-
         except ProviderError as e:
             logger.error(f"Provider error: {e}")
             yield StreamChunk(content=f"Error: Provider error: {e}", is_final=True)
@@ -623,7 +516,7 @@ class MessageProcessor:
     async def _load_skills(
         self,
         query: str,
-        skill_names: Optional[list[str]] = None,
+        skill_names: list[str] | None = None,
         auto_skills: bool = False,
     ) -> list[Skill]:
         """Load skills for this query.

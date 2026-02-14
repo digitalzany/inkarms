@@ -1,9 +1,9 @@
 """Discord bot platform adapter using Gateway WebSocket."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
-from collections.abc import AsyncIterator
-from typing import Optional
 
 from inkarms.models.platforms import (
     IncomingMessage,
@@ -43,8 +43,8 @@ class DiscordAdapter(PlatformAdapter):
     def __init__(
         self,
         bot_token: str,
-        allowed_guilds: Optional[list[str]] = None,
-        allowed_channels: Optional[list[str]] = None,
+        allowed_guilds: list[str] | None = None,
+        allowed_channels: list[str] | None = None,
         command_prefix: str = "!",
     ):
         """Initialize Discord adapter.
@@ -75,36 +75,33 @@ class DiscordAdapter(PlatformAdapter):
         intents.guilds = True
 
         self._bot = commands.Bot(command_prefix=command_prefix, intents=intents)
-        self._message_queue: asyncio.Queue[IncomingMessage] = asyncio.Queue()
         self._ready_event = asyncio.Event()
 
         # Register event handlers
         self._bot.event(self._on_ready)
         self._bot.event(self._on_message)
 
-        self._capabilities = PlatformCapabilities(
-            supports_streaming=True,  # Via message editing
-            supports_markdown=True,
-            supports_html=False,
-            supports_buttons=False,  # Could support via views, but not implemented
-            supports_attachments=True,
-            supports_threads=True,
-            supports_reactions=True,
-            supports_typing_indicator=True,
-            supports_message_editing=True,
-            markdown_flavor="standard",  # Discord uses standard markdown
-            max_message_length=2000,
-        )
+    CAPABILITIES = PlatformCapabilities(
+        supports_streaming=True,
+        supports_markdown=True,
+        supports_html=False,
+        supports_buttons=False,
+        supports_attachments=True,
+        supports_threads=True,
+        supports_reactions=True,
+        supports_typing_indicator=True,
+        supports_message_editing=True,
+        markdown_flavor="standard",
+        max_message_length=2000,
+    )
 
     @property
     def platform_type(self) -> PlatformType:
-        """The type of platform this adapter handles."""
         return PlatformType.DISCORD
 
     @property
     def capabilities(self) -> PlatformCapabilities:
-        """The capabilities supported by this platform."""
-        return self._capabilities
+        return self.CAPABILITIES
 
     async def start(self) -> None:
         """Start the Discord bot with Gateway connection."""
@@ -213,44 +210,21 @@ class DiscordAdapter(PlatformAdapter):
         self._running = False
         logger.info("Discord bot stopped")
 
-    async def receive_messages(self) -> AsyncIterator[IncomingMessage]:
-        """Receive messages from Discord.
-
-        Yields:
-            IncomingMessage objects as they arrive
-        """
-        while self._running:
-            try:
-                # Wait for message with timeout to allow checking _running
-                message = await asyncio.wait_for(
-                    self._message_queue.get(),
-                    timeout=1.0,
-                )
-                yield message
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                logger.error(f"Error receiving message: {e}", exc_info=True)
-
     async def send_message(
         self,
-        user: str,
+        destination_id: str,
         message: OutgoingMessage,
     ) -> str:
         """Send a message to a Discord channel.
 
         Args:
-            user: Channel ID (stored in metadata from incoming message)
+            destination_id: Channel ID
             message: The message to send
 
         Returns:
             Message ID of sent message
-
-        Raises:
-            discord.DiscordException: If sending fails
         """
-        # Extract channel ID from user parameter
-        channel_id = int(user)
+        channel_id = int(destination_id)
 
         try:
             channel = self._bot.get_channel(channel_id)
@@ -286,24 +260,12 @@ class DiscordAdapter(PlatformAdapter):
 
     async def send_streaming_chunk(
         self,
-        user: str,
+        destination_id: str,
         chunk: StreamChunk,
-        message_id: Optional[str] = None,
+        message_id: str | None = None,
     ) -> str:
-        """Send a streaming chunk via message editing.
-
-        For the first chunk, creates a new message.
-        For subsequent chunks, edits the existing message.
-
-        Args:
-            user: Channel ID
-            chunk: The streaming chunk
-            message_id: Existing message ID to edit
-
-        Returns:
-            Message ID
-        """
-        channel_id = int(user)
+        """Send a streaming chunk via message editing."""
+        channel_id = int(destination_id)
 
         try:
             channel = self._bot.get_channel(channel_id)
@@ -335,14 +297,10 @@ class DiscordAdapter(PlatformAdapter):
             logger.debug(f"Failed to send streaming chunk: {e}")
             return message_id or ""
 
-    async def send_typing_indicator(self, user: str) -> None:
-        """Send typing indicator to channel.
-
-        Args:
-            user: Channel ID
-        """
+    async def send_typing_indicator(self, destination_id: str) -> None:
+        """Send typing indicator to channel."""
         try:
-            channel_id = int(user)
+            channel_id = int(destination_id)
             channel = self._bot.get_channel(channel_id)
             if not channel:
                 channel = await self._bot.fetch_channel(channel_id)
@@ -352,22 +310,22 @@ class DiscordAdapter(PlatformAdapter):
         except Exception as e:
             logger.debug(f"Failed to send typing indicator: {e}")
 
-    def format_output(self, content: str, format: str) -> str:
+    def format_output(self, content: str, output_format: str) -> str:
         """Format content for Discord.
 
         Discord supports standard markdown.
 
         Args:
             content: The content to format
-            format: The format type ("plain", "markdown", "html")
+            output_format: The format type ("plain", "markdown", "html")
 
         Returns:
             Discord-formatted content
         """
-        if format == "plain":
+        if output_format == "plain":
             return content
 
-        if format == "markdown":
+        if output_format == "markdown":
             # Discord supports standard markdown
             return content
 

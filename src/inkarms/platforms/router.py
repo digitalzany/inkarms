@@ -1,13 +1,15 @@
 """Message router service for multi-platform messaging."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
-from collections.abc import AsyncIterator
-from typing import Optional
 
-from inkarms.models.platforms import IncomingMessage, OutgoingMessage, StreamChunk
+from inkarms.models.platforms import IncomingMessage, OutgoingMessage
 from inkarms.platforms.adapters.protocol import PlatformAdapter
 from inkarms.platforms.processor import MessageProcessor
+from inkarms.platforms.rate_limiter import RateLimiter, RateLimitExceeded
+from inkarms.platforms.session_mapper import SessionMapper
 
 logger = logging.getLogger(__name__)
 
@@ -15,36 +17,33 @@ logger = logging.getLogger(__name__)
 class MessageRouter:
     """Routes messages between platform adapters and the message processor.
 
-    The router:
-    1. Manages multiple platform adapters
-    2. Routes incoming messages to the processor
-    3. Handles concurrent message processing
-    4. Delivers responses back to appropriate platforms
-    5. Supports both streaming and non-streaming responses
+    Handles the full message lifecycle:
+    1. Receive message from adapter
+    2. Resolve session via SessionMapper
+    3. Check rate limit
+    4. Send typing indicator
+    5. Process via MessageProcessor (streaming or non-streaming)
+    6. Deliver response back via adapter
     """
 
-    def __init__(self, max_concurrent_tasks: int = 100) -> None:
-        """Initialize the message router.
-
-        Args:
-            max_concurrent_tasks: Maximum number of concurrent message processing tasks
-        """
+    def __init__(
+        self,
+        max_concurrent_tasks: int = 100,
+        processor: MessageProcessor | None = None,
+        session_mapper: SessionMapper | None = None,
+        rate_limiter: RateLimiter | None = None,
+    ) -> None:
         self._adapters: dict[str, PlatformAdapter] = {}
         self._tasks: set[asyncio.Task] = set()
         self._running = False
         self._max_concurrent_tasks = max_concurrent_tasks
-        self._message_processor: Optional[MessageProcessor] = MessageProcessor()
-        self._semaphore: Optional[asyncio.Semaphore] = None
+        self._processor = processor
+        self._session_mapper = session_mapper
+        self._rate_limiter = rate_limiter
+        self._semaphore: asyncio.Semaphore | None = None
 
     def register_adapter(self, adapter: PlatformAdapter) -> None:
-        """Register a platform adapter with the router.
-
-        Args:
-            adapter: The platform adapter to register
-
-        Raises:
-            ValueError: If an adapter for this platform is already registered
-        """
+        """Register a platform adapter with the router."""
         platform_name = adapter.platform_type.value
         if platform_name in self._adapters:
             raise ValueError(f"Adapter for {platform_name} already registered")
@@ -53,11 +52,7 @@ class MessageRouter:
         logger.info(f"Registered adapter for platform: {platform_name}")
 
     def unregister_adapter(self, platform_name: str) -> None:
-        """Unregister a platform adapter.
-
-        Args:
-            platform_name: The name of the platform to unregister
-        """
+        """Unregister a platform adapter."""
         if platform_name in self._adapters:
             del self._adapters[platform_name]
             logger.info(f"Unregistered adapter for platform: {platform_name}")
@@ -72,11 +67,9 @@ class MessageRouter:
         self._semaphore = asyncio.Semaphore(self._max_concurrent_tasks)
         logger.info("Starting message router")
 
-        # Start all registered adapters
         for platform_name, adapter in self._adapters.items():
             try:
                 await adapter.start()
-                # Create a task to listen for messages from this adapter
                 task = asyncio.create_task(
                     self._listen_to_adapter(adapter), name=f"listen-{platform_name}"
                 )
@@ -97,15 +90,12 @@ class MessageRouter:
         logger.info("Stopping message router")
         self._running = False
 
-        # Cancel all running tasks
         for task in self._tasks:
             task.cancel()
 
-        # Wait for all tasks to complete
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
 
-        # Stop all adapters
         for platform_name, adapter in self._adapters.items():
             try:
                 await adapter.stop()
@@ -116,11 +106,7 @@ class MessageRouter:
         logger.info("Message router stopped")
 
     async def _listen_to_adapter(self, adapter: PlatformAdapter) -> None:
-        """Listen for messages from a platform adapter.
-
-        Args:
-            adapter: The adapter to listen to
-        """
+        """Listen for messages from a platform adapter."""
         platform_name = adapter.platform_type.value
         logger.info(f"Listening for messages from {platform_name}")
 
@@ -129,7 +115,6 @@ class MessageRouter:
                 if not self._running:
                     break
 
-                # Create a task to handle this message
                 task = asyncio.create_task(
                     self._handle_message(adapter, message),
                     name=f"handle-{platform_name}-{message.message_id}",
@@ -145,116 +130,111 @@ class MessageRouter:
     async def _handle_message(
         self, adapter: PlatformAdapter, message: IncomingMessage
     ) -> None:
-        """Handle an incoming message from a platform.
-
-        This method is meant to be overridden or have a processor injected.
-        For now, it's a placeholder that logs the message.
-
-        Args:
-            adapter: The adapter that received the message
-            message: The incoming message
-        """
-        # Acquire semaphore to limit concurrent processing
+        """Handle an incoming message with semaphore-limited concurrency."""
         if self._semaphore:
             async with self._semaphore:
                 await self._process_message(adapter, message)
         else:
             await self._process_message(adapter, message)
 
+    def _resolve_destination(self, message: IncomingMessage) -> str:
+        """Resolve the destination_id for sending replies."""
+        return message.metadata.get("channel_id", message.user.platform_user_id)
+
     async def _process_message(
         self, adapter: PlatformAdapter, message: IncomingMessage
     ) -> None:
-        """Process a message (placeholder for now).
+        """Process a message through the full lifecycle."""
+        destination_id = self._resolve_destination(message)
 
-        This will be connected to the MessageProcessor in the next task.
+        # Resolve session
+        session_id = None
+        if self._session_mapper:
+            session_id = self._session_mapper.get_session_id(
+                message.user, create_if_missing=True,
+            )
 
-        Args:
-            adapter: The adapter that received the message
-            message: The incoming message
-        """
-        logger.info(f"Received message: {message}")
+        # Check rate limit
+        if self._rate_limiter:
+            try:
+                await self._rate_limiter.check_limit(message.user)
+            except RateLimitExceeded:
+                logger.warning(f"Rate limit exceeded for {message.user}")
+                await adapter.send_message(
+                    destination_id,
+                    OutgoingMessage(
+                        content="Rate limit exceeded. Please wait before sending more messages.",
+                        format="plain",
+                    ),
+                )
+                return
 
-        response = await self._message_processor.process(
+        # Send typing indicator if supported
+        if adapter.capabilities.supports_typing_indicator:
+            await adapter.send_typing_indicator(destination_id)
+
+        # If no processor, just log and return
+        if not self._processor:
+            logger.info(f"No processor configured, ignoring message: {message.message_id}")
+            return
+
+        try:
+            if adapter.capabilities.supports_streaming:
+                await self._process_streaming(adapter, message, destination_id, session_id)
+            else:
+                await self._process_non_streaming(adapter, message, destination_id, session_id)
+        except Exception as e:
+            logger.error(f"Failed to process message: {e}", exc_info=True)
+
+    async def _process_streaming(
+        self,
+        adapter: PlatformAdapter,
+        message: IncomingMessage,
+        destination_id: str,
+        session_id: str | None,
+    ) -> None:
+        """Process a message with streaming response."""
+        message_id = None
+        async for chunk in self._processor.process_streaming(
             query=message.content,
-            session_id=message.thread_id,
+            session_id=session_id,
+            platform=message.platform,
             platform_user_id=message.user.platform_user_id,
-            platform_username=message.user.username or message.user.display_name,
-        )
+            platform_username=message.user.username,
+        ):
+            message_id = await adapter.send_streaming_chunk(
+                destination_id, chunk, message_id,
+            )
 
-        # Placeholder: Echo the message back
-        # This will be replaced with actual message processing
-        response = OutgoingMessage(
-            content=f"{response.content}",
-            format="markdown",
-            thread_id=message.thread_id,
-            reply_to_message_id=message.message_id,
-        )
-
-        try:
-            await adapter.send_message(message.user.platform_user_id, response)
-
-        except Exception as e:
-            logger.error(f"Failed to send response: {e}", exc_info=True)
-
-    async def send_streaming_response(
+    async def _process_non_streaming(
         self,
         adapter: PlatformAdapter,
-        user_id: str,
-        chunks: AsyncIterator[StreamChunk],
-        thread_id: Optional[str] = None,
+        message: IncomingMessage,
+        destination_id: str,
+        session_id: str | None,
     ) -> None:
-        """Send a streaming response to a user.
+        """Process a message with non-streaming response."""
+        response = await self._processor.process(
+            query=message.content,
+            session_id=session_id,
+            platform=message.platform,
+            platform_user_id=message.user.platform_user_id,
+            platform_username=message.user.username,
+        )
 
-        Args:
-            adapter: The adapter to send through
-            user_id: Platform-specific user identifier
-            chunks: Async iterator of streaming chunks
-            thread_id: Optional thread ID for threaded platforms
-        """
-        message_id: Optional[str] = None
+        if response.error:
+            await adapter.send_message(
+                destination_id,
+                OutgoingMessage(content=f"Error: {response.error}", format="plain"),
+            )
+        else:
+            await adapter.send_message(
+                destination_id,
+                OutgoingMessage(content=response.content, format="markdown"),
+            )
 
-        try:
-            async for chunk in chunks:
-                message_id = await adapter.send_streaming_chunk(user_id, chunk, message_id)
-
-                # If this is the final chunk and we haven't created a message yet,
-                # send it as a regular message
-                if chunk.is_final and message_id is None:
-                    response = OutgoingMessage(
-                        content=chunk.content, format="plain", thread_id=thread_id
-                    )
-                    await adapter.send_message(user_id, response)
-
-        except Exception as e:
-            logger.error(f"Error sending streaming response: {e}", exc_info=True)
-
-    async def send_response(
-        self,
-        adapter: PlatformAdapter,
-        user_id: str,
-        message: OutgoingMessage,
-    ) -> None:
-        """Send a non-streaming response to a user.
-
-        Args:
-            adapter: The adapter to send through
-            user_id: Platform-specific user identifier
-            message: The message to send
-        """
-        try:
-            await adapter.send_message(user_id, message)
-        except Exception as e:
-            logger.error(f"Error sending response: {e}", exc_info=True)
-
-    def get_adapter(self, platform_name: str) -> Optional[PlatformAdapter]:
-        """Get an adapter by platform name.
-
-        Args:
-            platform_name: The name of the platform
-
-        Returns:
-            The adapter, or None if not found
-        """
+    def get_adapter(self, platform_name: str) -> PlatformAdapter | None:
+        """Get an adapter by platform name."""
         return self._adapters.get(platform_name)
 
     @property
@@ -268,11 +248,7 @@ class MessageRouter:
         return list(self._adapters.keys())
 
     async def health_check(self) -> dict[str, bool]:
-        """Check health of all adapters.
-
-        Returns:
-            Dict mapping platform names to health status
-        """
+        """Check health of all adapters."""
         health = {}
         for platform_name, adapter in self._adapters.items():
             try:

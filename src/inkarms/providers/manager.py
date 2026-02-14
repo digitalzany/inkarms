@@ -5,8 +5,9 @@ Main interface for AI provider access via LiteLLM.
 Handles model resolution, API key management, fallbacks, and response parsing.
 """
 
-import time
+import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from datetime import datetime
 from typing import Any
@@ -15,6 +16,14 @@ import litellm
 from litellm import acompletion, completion_cost
 
 from inkarms.config.schema import ProviderConfig
+from inkarms.models.providers import (
+    CompletionResponse,
+    HealthStatus,
+    Message,
+    ProviderHealth,
+    StreamChunk,
+    TokenUsage,
+)
 from inkarms.providers.cost import CostTracker
 from inkarms.providers.exceptions import (
     AllProvidersFailedError,
@@ -24,14 +33,6 @@ from inkarms.providers.exceptions import (
     should_retry,
 )
 from inkarms.providers.fallback import FallbackHandler
-from inkarms.models.providers import (
-    CompletionResponse,
-    HealthStatus,
-    Message,
-    ProviderHealth,
-    StreamChunk,
-    TokenUsage,
-)
 from inkarms.secrets import SecretsManager
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ class ProviderManager:
     def _extract_provider(model: str) -> str:
         """Extract provider name from model string."""
         if "/" in model:
-            return model.split("/")[0]
+            return model.split("/", maxsplit=1)[0]
         return "unknown"
 
     @staticmethod
@@ -245,11 +246,19 @@ class ProviderManager:
             if message.content:
                 content_blocks.append({"type": "text", "text": message.content})
             for tool_call in message.tool_calls:
+                raw_args = tool_call.function.arguments
+                if isinstance(raw_args, str):
+                    try:
+                        parsed_args = json.loads(raw_args)
+                    except (json.JSONDecodeError, TypeError):
+                        parsed_args = raw_args
+                else:
+                    parsed_args = raw_args
                 content_blocks.append({
                     "type": "tool_use",
                     "id": tool_call.id,
                     "name": tool_call.function.name,
-                    "input": tool_call.function.arguments,
+                    "input": parsed_args,
                 })
             content = content_blocks
 

@@ -24,10 +24,10 @@ from inkarms.models.platforms import (
 from inkarms.platforms.adapters.protocol import PlatformAdapter
 
 __all__ = [
-    "PlatformAdapter",
-    "PlatformType",
-    "PlatformUser",
-    "PlatformCapabilities",
     "IncomingMessage",
     "OutgoingMessage",
+    "PlatformAdapter",
+    "PlatformCapabilities",
+    "PlatformType",
+    "PlatformUser",
 ]

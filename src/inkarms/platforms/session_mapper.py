@@ -1,10 +1,11 @@
 """Session mapper for platform user to InkArms session mapping."""
 
+from __future__ import annotations
+
 import json
 import logging
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -20,8 +21,8 @@ class SessionMapping(BaseModel):
     platform: PlatformType
     platform_user_id: str
     session_id: str
-    created_at: datetime = Field(default_factory=datetime.utcnow)
-    last_accessed: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    last_accessed: datetime = Field(default_factory=lambda: datetime.now(UTC))
     metadata: dict[str, str] = Field(default_factory=dict)
 
     def __str__(self) -> str:
@@ -39,7 +40,7 @@ class SessionMapper:
     - User metadata tracking
     """
 
-    def __init__(self, storage_path: Optional[Path] = None):
+    def __init__(self, storage_path: Path | None = None):
         """Initialize the session mapper.
 
         Args:
@@ -57,7 +58,7 @@ class SessionMapper:
         self,
         user: PlatformUser,
         create_if_missing: bool = True,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Get session ID for a platform user.
 
         Args:
@@ -73,7 +74,7 @@ class SessionMapper:
         if key in self._mappings:
             mapping = self._mappings[key]
             # Update last accessed time
-            mapping.last_accessed = datetime.utcnow()
+            mapping.last_accessed = datetime.now(UTC)
             self._save()
             return mapping.session_id
 
@@ -151,7 +152,7 @@ class SessionMapper:
         logger.info(f"Unlinked {key}, new session: {new_session_id}")
         return True
 
-    def get_mapping(self, user: PlatformUser) -> Optional[SessionMapping]:
+    def get_mapping(self, user: PlatformUser) -> SessionMapping | None:
         """Get full mapping for a user.
 
         Args:
@@ -183,7 +184,7 @@ class SessionMapper:
         return False
 
     def list_mappings(
-        self, platform: Optional[PlatformType] = None
+        self, platform: PlatformType | None = None
     ) -> list[SessionMapping]:
         """List all session mappings.
 
@@ -223,7 +224,7 @@ class SessionMapper:
         Returns:
             Generated session ID
         """
-        timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
         # Sanitize user ID (remove special characters)
         safe_user_id = "".join(c for c in user.platform_user_id if c.isalnum() or c in "-_")
         return f"{user.platform.value}_{safe_user_id}_{timestamp}"
@@ -262,7 +263,7 @@ class SessionMapper:
 
 
 # Singleton instance
-_session_mapper: Optional[SessionMapper] = None
+_session_mapper: SessionMapper | None = None
 
 
 def get_session_mapper() -> SessionMapper:
