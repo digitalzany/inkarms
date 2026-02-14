@@ -310,23 +310,21 @@ class TestSessionMapper:
 
     def test_generate_session_id(self, mapper, telegram_user):
         """Test the _generate_session_id method."""
-        session_id = mapper._generate_session_id(telegram_user)
+        session_id = mapper._generate_session_id(
+            telegram_user.platform, telegram_user.platform_user_id
+        )
 
-        # Should have format: platform_userid_timestamp
+        # Should have format: platform_userid_uuid
         assert session_id.startswith("telegram_")
         assert "123456789" in session_id
-        # Should have timestamp (format: YYYYMMDD_HHMMSS)
         parts = session_id.split("_")
         assert len(parts) >= 3
 
     def test_generate_session_id_sanitizes_special_chars(self, mapper):
         """Test that special characters are removed from session ID."""
-        user = PlatformUser(
-            platform=PlatformType.TELEGRAM,
-            platform_user_id="user@example.com",
+        session_id = mapper._generate_session_id(
+            PlatformType.TELEGRAM, "user@example.com"
         )
-
-        session_id = mapper._generate_session_id(user)
 
         # Should not contain @ or . (only alphanumeric, -, _)
         assert "@" not in session_id

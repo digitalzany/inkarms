@@ -8,7 +8,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any
 
-from inkarms.memory.context import TokenCounter
+from inkarms.memory.context import ContextTracker, TokenCounter
+from inkarms.memory.summarization import format_conversation, generate_llm_summary
 from inkarms.models.memory import ConversationTurn, Session, TurnRole
 
 
@@ -210,11 +211,8 @@ Summary:"""
         if not compactable:
             return session
 
-        # Format conversation for summarization
-        conversation_text = self._format_conversation(compactable)
-
-        # Generate summary using LLM
-        summary = await self._generate_summary(conversation_text)
+        # Generate summary
+        summary = await self._generate_summary(compactable)
 
         # Create summary turn
         summary_turn = ConversationTurn(
@@ -236,76 +234,68 @@ Summary:"""
 
         return compacted
 
-    def _format_conversation(self, turns: list[ConversationTurn]) -> str:
-        """Format turns into text for summarization.
+    async def _generate_summary(self, turns: list[ConversationTurn]) -> str:
+        """Generate a summary of the given turns.
 
         Args:
-            turns: Turns to format.
-
-        Returns:
-            Formatted conversation text.
-        """
-        lines = []
-        for turn in turns:
-            role = turn.role.upper() if isinstance(turn.role, str) else turn.role.value.upper()
-            lines.append(f"{role}: {turn.content[:1000]}")  # Truncate very long messages
-        return "\n\n".join(lines)
-
-    async def _generate_summary(self, conversation: str) -> str:
-        """Generate a summary using LLM.
-
-        Args:
-            conversation: Conversation text.
+            turns: Conversation turns to summarize.
 
         Returns:
             Summary text.
         """
-        # Try to use the provider manager if available
-        try:
-            from inkarms.providers import get_provider_manager, Message
+        conversation_text = format_conversation(turns)
+        return await generate_llm_summary(
+            conversation_text,
+            prompt_template=self.SUMMARY_PROMPT,
+            model=self.summary_model,
+            max_tokens=self.summary_max_tokens,
+        )
 
-            manager = get_provider_manager()
 
-            prompt = self.SUMMARY_PROMPT.format(
-                max_tokens=self.summary_max_tokens,
-                conversation=conversation,
-            )
+class CompactionOrchestrator:
+    """Manages compaction decisions and execution.
 
-            response = await manager.complete(
-                [Message.user(prompt)],
-                model=self.summary_model,
-                stream=False,
-                max_tokens=self.summary_max_tokens,
-            )
+    Extracted from SessionManager to satisfy Single Responsibility Principle.
+    """
 
-            return response.content  # type: ignore
+    def __init__(
+        self,
+        tracker: ContextTracker,
+        strategy: CompactionStrategy | str = CompactionStrategy.SUMMARIZE,
+        preserve_recent: int = 5,
+        summary_model: str | None = None,
+        summary_max_tokens: int = 500,
+    ):
+        self._tracker = tracker
+        self._strategy = strategy
+        self._preserve_recent = preserve_recent
+        self._summary_model = summary_model
+        self._summary_max_tokens = summary_max_tokens
 
-        except Exception:
-            # Fallback to simple truncation if LLM not available
-            return self._fallback_summary(conversation)
+    def should_compact(self, session: Session) -> bool:
+        """Check if compaction should be triggered."""
+        self._tracker.track_session(session)
+        return self._tracker.get_usage().should_compact
 
-    def _fallback_summary(self, conversation: str) -> str:
-        """Create a simple summary without LLM.
+    def should_handoff(self, session: Session) -> bool:
+        """Check if handoff should be triggered."""
+        self._tracker.track_session(session)
+        return self._tracker.get_usage().should_handoff
 
-        Args:
-            conversation: Conversation text.
-
-        Returns:
-            Simple summary.
-        """
-        # Just take the first part of the conversation as context
-        lines = conversation.split("\n")
-        summary_lines = []
-        token_count = 0
-
-        for line in lines:
-            line_tokens = self.counter.count(line)
-            if token_count + line_tokens > self.summary_max_tokens:
-                break
-            summary_lines.append(line)
-            token_count += line_tokens
-
-        return "\n".join(summary_lines) + "\n[... earlier context truncated ...]"
+    async def compact(
+        self,
+        session: Session,
+        strategy: CompactionStrategy | str | None = None,
+        target_tokens: int | None = None,
+    ) -> Session:
+        """Compact the session to reduce context size."""
+        compactor = get_compactor(
+            strategy or self._strategy,
+            preserve_recent=self._preserve_recent,
+            summary_model=self._summary_model,
+            summary_max_tokens=self._summary_max_tokens,
+        )
+        return await compactor.compact(session, target_tokens)
 
 
 def get_compactor(

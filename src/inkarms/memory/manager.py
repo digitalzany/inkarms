@@ -4,13 +4,16 @@ Session manager for InkArms.
 Provides the main interface for managing sessions, context, and memory.
 """
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from inkarms.config import get_config
-from inkarms.memory.compaction import CompactionStrategy, get_compactor
+from inkarms.memory.compaction import CompactionOrchestrator, CompactionStrategy
 from inkarms.memory.context import ContextTracker
 from inkarms.memory.handoff import HandoffManager
+from inkarms.memory.persister import SessionPersister
+from inkarms.memory.storage import MemoryStorage
 from inkarms.models.memory import (
     ContextUsage,
     ConversationTurn,
@@ -18,20 +21,19 @@ from inkarms.models.memory import (
     MemoryEntry,
     MemoryType,
     Session,
-    Snapshot,
 )
-from inkarms.memory.storage import MemoryStorage
+
+logger = logging.getLogger(__name__)
 
 
 class SessionManager:
     """Main interface for managing sessions and memory.
 
-    Provides:
-    - Session lifecycle management
-    - Context tracking and monitoring
-    - Automatic compaction when needed
-    - Handoff creation and recovery
-    - Memory persistence
+    Acts as a thin facade that delegates to focused components:
+    - ContextTracker: token counting and context window monitoring
+    - SessionPersister: all disk I/O (daily logs, snapshots, memory listing)
+    - CompactionOrchestrator: compaction decisions and execution
+    - HandoffManager: handoff creation and recovery
     """
 
     def __init__(
@@ -48,30 +50,46 @@ class SessionManager:
         # Load config
         config = get_config()
 
-        # Determine model
+        # Determine model — validate it's not empty
         self.model = model or config.providers.default
+        if not self.model:
+            logger.warning("SessionManager initialized without a model name")
+
+        # Initialize storage (exposed via property for external consumers)
+        self._storage = MemoryStorage(storage_path)
 
         # Initialize components
-        self.storage = MemoryStorage(storage_path)
         self.tracker = ContextTracker(
-            model=self.model,
+            model=self.model or "default",
             compact_threshold=config.context.auto_compact_threshold,
             handoff_threshold=config.context.handoff_threshold,
         )
+        self.persister = SessionPersister(
+            storage=self._storage,
+            auto_save=config.context.daily_logs,
+        )
+        self.compaction = CompactionOrchestrator(
+            tracker=self.tracker,
+            strategy=config.context.compaction.strategy,
+            preserve_recent=config.context.compaction.preserve_recent_turns,
+            summary_model=config.context.compaction.summary_model,
+            summary_max_tokens=config.context.compaction.summary_max_tokens,
+        )
         self.handoff_manager = HandoffManager(
-            storage=self.storage,
+            storage=self._storage,
             include_full_context=config.context.handoff.include_full_context,
         )
 
-        # Compaction settings
-        self.compaction_strategy = config.context.compaction.strategy
-        self.preserve_recent = config.context.compaction.preserve_recent_turns
-        self.summary_model = config.context.compaction.summary_model
-        self.summary_max_tokens = config.context.compaction.summary_max_tokens
+        # Summary model (used by create_handoff)
+        self._summary_model = config.context.compaction.summary_model
 
         # Current session
         self._session: Session | None = None
-        self._auto_save = config.context.daily_logs
+
+    @property
+    def storage(self) -> MemoryStorage:
+        """Access the underlying storage backend."""
+        return self._storage
 
     @property
     def session(self) -> Session:
@@ -86,15 +104,12 @@ class SessionManager:
         Returns:
             Session instance.
         """
-        # Try to load today's session
-        session = self.storage.load_daily_session()
+        session = self.persister.load_daily_session()
 
         if session is not None:
-            # Track the loaded session
             self.tracker.track_session(session)
             return session
 
-        # Create new session
         return Session()
 
     def set_model(self, model: str) -> None:
@@ -131,10 +146,7 @@ class SessionManager:
         token_count = self.tracker.count_text(content)
         turn = self.session.add_user_message(content, token_count)
         self.tracker.add_turn(turn)
-
-        if self._auto_save:
-            self._auto_save_session()
-
+        self.persister.auto_save(self._session)  # type: ignore[arg-type]
         return turn
 
     def add_assistant_message(
@@ -153,24 +165,25 @@ class SessionManager:
         Returns:
             Created turn.
         """
+        resolved_model = model or self.model
+        if not resolved_model:
+            logger.debug("add_assistant_message falling back to empty model name")
+
         token_count = self.tracker.count_text(content)
         turn = self.session.add_assistant_message(
             content,
             token_count=token_count,
-            model=model or self.model,
+            model=resolved_model,
             cost=cost,
         )
         self.tracker.add_turn(turn)
-
-        if self._auto_save:
-            self._auto_save_session()
-
+        self.persister.auto_save(self._session)  # type: ignore[arg-type]
         return turn
 
     def save_session(self) -> None:
         """Explicitly save the current session to daily log."""
         if self._session is not None:
-            self._auto_save_session()
+            self.persister.save_daily(self._session)
 
     def restore_session(self, session: Session) -> None:
         """Restore a session from an external source (e.g., a loaded snapshot).
@@ -182,13 +195,6 @@ class SessionManager:
         """
         self._session = session
         self.tracker.track_session(session)
-
-    def _auto_save_session(self) -> None:
-        """Auto-save the session to daily log."""
-        try:
-            self.storage.save_daily_session(self._session)  # type: ignore
-        except Exception:
-            pass  # Silent fail for auto-save
 
     def get_messages(self, include_system: bool = True) -> list[dict[str, Any]]:
         """Get messages for LLM completion.
@@ -211,22 +217,12 @@ class SessionManager:
         return self.tracker.get_usage()
 
     def should_compact(self) -> bool:
-        """Check if compaction should be triggered.
-
-        Returns:
-            True if compaction is recommended.
-        """
-        usage = self.get_context_usage()
-        return usage.should_compact
+        """Check if compaction should be triggered."""
+        return self.compaction.should_compact(self.session)
 
     def should_handoff(self) -> bool:
-        """Check if handoff should be triggered.
-
-        Returns:
-            True if handoff is recommended.
-        """
-        usage = self.get_context_usage()
-        return usage.should_handoff
+        """Check if handoff should be triggered."""
+        return self.compaction.should_handoff(self.session)
 
     async def compact(
         self,
@@ -242,25 +238,11 @@ class SessionManager:
         Returns:
             Compacted session.
         """
-        if strategy is None:
-            strategy = self.compaction_strategy
-
-        compactor = get_compactor(
-            strategy,
-            preserve_recent=self.preserve_recent,
-            summary_model=self.summary_model,
-            summary_max_tokens=self.summary_max_tokens,
+        self._session = await self.compaction.compact(
+            self.session, strategy=strategy, target_tokens=target_tokens,
         )
-
-        self._session = await compactor.compact(self.session, target_tokens)
-
-        # Update tracking
         self.tracker.track_session(self._session)
-
-        # Save
-        if self._auto_save:
-            self._auto_save_session()
-
+        self.persister.auto_save(self._session)
         return self._session
 
     async def create_handoff(self) -> HandoffDocument:
@@ -271,7 +253,7 @@ class SessionManager:
         """
         return await self.handoff_manager.create_handoff(
             self.session,
-            summary_model=self.summary_model,
+            summary_model=self._summary_model,
         )
 
     def check_for_handoff(self) -> HandoffDocument | None:
@@ -308,13 +290,7 @@ class SessionManager:
         Returns:
             Path to saved snapshot.
         """
-        snapshot = Snapshot(
-            name=name,
-            description=description,
-            topic=topic,
-            session=self.session,
-        )
-        return self.storage.save_snapshot(snapshot)
+        return self.persister.save_snapshot(self.session, name, description, topic)
 
     def load_snapshot(self, name: str) -> Session | None:
         """Load a session from a snapshot.
@@ -325,9 +301,9 @@ class SessionManager:
         Returns:
             Session from snapshot, or None if not found.
         """
-        snapshot = self.storage.load_snapshot(name)
-        if snapshot:
-            self._session = snapshot.session
+        session = self.persister.load_snapshot(name)
+        if session:
+            self._session = session
             self.tracker.track_session(self._session)
             return self._session
         return None
@@ -341,9 +317,7 @@ class SessionManager:
         Returns:
             List of memory entries.
         """
-        if isinstance(memory_type, str):
-            memory_type = MemoryType(memory_type)
-        return self.storage.list_all(memory_type)
+        return self.persister.list_memory(memory_type)
 
     def clear_session(self) -> None:
         """Clear the current session."""

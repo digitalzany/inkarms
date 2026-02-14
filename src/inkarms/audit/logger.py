@@ -45,6 +45,12 @@ class AuditEventType(str, Enum):
     CONTEXT_COMPACTED = "context_compacted"
     HANDOFF_CREATED = "handoff_created"
 
+    # Tool execution events
+    TOOL_START = "tool_start"
+    TOOL_COMPLETE = "tool_complete"
+    TOOL_DENIED = "tool_denied"
+    TOOL_ERROR = "tool_error"
+
     # System events
     SYSTEM_START = "system_start"
     SYSTEM_ERROR = "system_error"
@@ -584,6 +590,105 @@ class AuditLogger:
             },
         )
         self._write_event(event)
+
+    # Tool execution events
+
+    def log_tool_start(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        parameters: dict[str, Any] | None = None,
+        is_dangerous: bool = False,
+    ) -> None:
+        """Log the start of a tool execution."""
+        data: dict[str, Any] = {
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "is_dangerous": is_dangerous,
+        }
+        if parameters is not None:
+            data["parameters"] = self._redact_parameters(parameters)
+        event = self._create_event(AuditEventType.TOOL_START, data)
+        self._write_event(event)
+
+    def log_tool_complete(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        execution_time: float,
+        output_preview: str = "",
+        exit_code: int | None = None,
+    ) -> None:
+        """Log a completed tool execution."""
+        data: dict[str, Any] = {
+            "tool_name": tool_name,
+            "tool_call_id": tool_call_id,
+            "execution_time": execution_time,
+        }
+        if output_preview:
+            data["output_preview"] = output_preview[:200]
+        if exit_code is not None:
+            data["exit_code"] = exit_code
+        event = self._create_event(AuditEventType.TOOL_COMPLETE, data)
+        self._write_event(event)
+
+    def log_tool_error(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        execution_time: float,
+        error: str,
+    ) -> None:
+        """Log a tool execution error."""
+        event = self._create_event(
+            AuditEventType.TOOL_ERROR,
+            {
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "execution_time": execution_time,
+                "error": error,
+            },
+        )
+        self._write_event(event)
+
+    def log_tool_denied(
+        self,
+        tool_name: str,
+        tool_call_id: str,
+        reason: str,
+    ) -> None:
+        """Log a denied tool execution."""
+        event = self._create_event(
+            AuditEventType.TOOL_DENIED,
+            {
+                "tool_name": tool_name,
+                "tool_call_id": tool_call_id,
+                "reason": reason,
+            },
+        )
+        self._write_event(event)
+
+    def _redact_parameters(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        """Redact sensitive values in tool parameters.
+
+        Args:
+            parameters: Raw parameter dict.
+
+        Returns:
+            Redacted parameter dict.
+        """
+        redacted = {}
+        for key, value in parameters.items():
+            if isinstance(value, str):
+                if self.hash_queries:
+                    redacted[key] = self._hash_text(value)
+                elif self.redact_paths:
+                    redacted[key] = self._redact_text(value)
+                else:
+                    redacted[key] = value
+            else:
+                redacted[key] = value
+        return redacted
 
     def close(self) -> None:
         """Close the audit logger and flush remaining events."""

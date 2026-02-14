@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 
-from inkarms.models.platforms import IncomingMessage, OutgoingMessage
+from inkarms.commands import CommandContext, CommandRegistry
+from inkarms.models.platforms import IncomingMessage, OutgoingMessage, PlatformUser
 from inkarms.platforms.adapters.protocol import PlatformAdapter
 from inkarms.platforms.processor import MessageProcessor
 from inkarms.platforms.rate_limiter import RateLimiter, RateLimitExceeded
 from inkarms.platforms.session_mapper import SessionMapper
+from inkarms.platforms.sessions import PlatformSessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -19,11 +22,13 @@ class MessageRouter:
 
     Handles the full message lifecycle:
     1. Receive message from adapter
-    2. Resolve session via SessionMapper
+    2. Resolve session via SessionMapper (per-channel)
     3. Check rate limit
     4. Send typing indicator
     5. Process via MessageProcessor (streaming or non-streaming)
     6. Deliver response back via adapter
+
+    Also provides a command callback for adapters that support slash commands.
     """
 
     def __init__(
@@ -32,6 +37,7 @@ class MessageRouter:
         processor: MessageProcessor | None = None,
         session_mapper: SessionMapper | None = None,
         rate_limiter: RateLimiter | None = None,
+        session_store: PlatformSessionStore | None = None,
     ) -> None:
         self._adapters: dict[str, PlatformAdapter] = {}
         self._tasks: set[asyncio.Task] = set()
@@ -40,13 +46,22 @@ class MessageRouter:
         self._processor = processor
         self._session_mapper = session_mapper
         self._rate_limiter = rate_limiter
+        self._session_store = session_store or PlatformSessionStore()
         self._semaphore: asyncio.Semaphore | None = None
 
     def register_adapter(self, adapter: PlatformAdapter) -> None:
-        """Register a platform adapter with the router."""
+        """Register a platform adapter with the router.
+
+        Automatically injects the command callback into adapters that
+        support it (e.g. TelegramAdapter).
+        """
         platform_name = adapter.platform_type.value
         if platform_name in self._adapters:
             raise ValueError(f"Adapter for {platform_name} already registered")
+
+        # Inject command callback if the adapter supports it
+        if hasattr(adapter, "set_command_callback"):
+            adapter.set_command_callback(self.handle_command)
 
         self._adapters[platform_name] = adapter
         logger.info(f"Registered adapter for platform: {platform_name}")
@@ -103,6 +118,9 @@ class MessageRouter:
             except Exception as e:
                 logger.error(f"Failed to stop adapter for {platform_name}: {e}")
 
+        # Save all sessions before shutdown
+        self._session_store.save_all()
+
         logger.info("Message router stopped")
 
     async def _listen_to_adapter(self, adapter: PlatformAdapter) -> None:
@@ -146,12 +164,13 @@ class MessageRouter:
     ) -> None:
         """Process a message through the full lifecycle."""
         destination_id = self._resolve_destination(message)
+        channel_id = message.metadata.get("channel_id")
 
-        # Resolve session
+        # Resolve session (per-channel)
         session_id = None
         if self._session_mapper:
             session_id = self._session_mapper.get_session_id(
-                message.user, create_if_missing=True,
+                message.user, channel_id=channel_id, create_if_missing=True,
             )
 
         # Check rate limit
@@ -232,6 +251,106 @@ class MessageRouter:
                 destination_id,
                 OutgoingMessage(content=response.content, format="markdown"),
             )
+
+    # --- Command handling ---
+
+    async def handle_command(
+        self,
+        user: PlatformUser,
+        command: str,
+        args: str,
+        channel_id: str,
+        _message_id: str,
+    ) -> str | None:
+        """Handle a slash command from a platform adapter.
+
+        This is the callback passed to adapters that support commands.
+
+        Args:
+            user: Platform user who sent the command.
+            command: Command name (e.g. "/help").
+            args: Command arguments.
+            channel_id: Channel/chat ID where the command was sent.
+            _message_id: Message ID of the command (reserved for future use).
+
+        Returns:
+            Reply text, or None if no reply needed.
+        """
+        # Ensure command starts with /
+        if not command.startswith("/"):
+            command = f"/{command}"
+
+        # Handle /new — create a fresh session for this channel
+        if command == "/new":
+            return self._handle_new_session(user, channel_id)
+
+        # Resolve session for this channel
+        session_id = None
+        session_mgr = None
+        if self._session_mapper:
+            session_id = self._session_mapper.get_session_id(
+                user, channel_id=channel_id, create_if_missing=True,
+            )
+        if session_id:
+            session_mgr = self._session_store.get_manager(session_id)
+
+        # Build command context
+        ctx = self._build_command_context(session_mgr)
+
+        # Build full command text for the registry
+        full_text = f"{command} {args}".strip() if args else command
+
+        result = CommandRegistry.handle(full_text, ctx)
+        if result is None:
+            return f"Unknown command: {command}. Type /help for available commands."
+
+        # If /load was used and session was loaded, sync chain
+        if command == "/load" and args and session_id and self._session_mapper:
+            self._session_mapper._sync_chain(
+                self._session_mapper._to_channel_identifier(
+                    user.platform.value, channel_id
+                ),
+                session_id,
+            )
+
+        return result.message
+
+    def _handle_new_session(self, user: PlatformUser, channel_id: str) -> str:
+        """Create a new session for a channel, syncing chain members."""
+        new_session_id = f"{user.platform.value}_{uuid.uuid4().hex[:8]}"
+
+        if self._session_mapper:
+            self._session_mapper.set_session_id(
+                user, new_session_id, channel_id=channel_id,
+            )
+
+        # Create a fresh SessionManager for the new session
+        self._session_store.get_manager(new_session_id)
+
+        return f"New session started: {new_session_id[:16]}..."
+
+    def _build_command_context(
+        self,
+        session_mgr,
+    ) -> CommandContext:
+        """Build a CommandContext for platform command handling."""
+        model = ""
+        provider = ""
+        if session_mgr:
+            model = session_mgr.model or ""
+            info = session_mgr.get_session_info()
+            provider = info.get("model", "")
+
+        return CommandContext(
+            session_manager=session_mgr,
+            model=model,
+            provider=provider,
+            tool_registry=(
+                self._processor._tool_registry if self._processor else None
+            ),
+            agent_config=None,
+            on_clear=session_mgr.clear_session if session_mgr else None,
+        )
 
     def get_adapter(self, platform_name: str) -> PlatformAdapter | None:
         """Get an adapter by platform name."""

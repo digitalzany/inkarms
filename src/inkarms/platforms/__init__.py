@@ -11,7 +11,8 @@ Key Components:
     - PlatformAdapter: Abstract protocol for platform implementations
     - MessageRouter: Routes messages between platforms and processor
     - MessageProcessor: Platform-agnostic message processing
-    - SessionMapper: Maps platform users to session IDs
+    - SessionMapper: Maps platform channels to session IDs
+    - PlatformSessionStore: Per-channel SessionManager cache
 """
 
 from inkarms.models.platforms import (
@@ -22,12 +23,14 @@ from inkarms.models.platforms import (
     PlatformUser,
 )
 from inkarms.platforms.adapters.protocol import PlatformAdapter
+from inkarms.platforms.sessions import PlatformSessionStore
 
 __all__ = [
     "IncomingMessage",
     "OutgoingMessage",
     "PlatformAdapter",
     "PlatformCapabilities",
+    "PlatformSessionStore",
     "PlatformType",
     "PlatformUser",
 ]

@@ -469,8 +469,8 @@ class TestRouterOrchestration:
         await asyncio.sleep(0.1)
         await router.stop()
 
-        # Session should have been created
-        mapping = session_mapper.get_mapping(user)
+        # Session should have been created (per-channel)
+        mapping = session_mapper.get_mapping(user, channel_id="ch_1")
         assert mapping is not None
         assert mapping.session_id is not None
 

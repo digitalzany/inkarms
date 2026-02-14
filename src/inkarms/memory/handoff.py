@@ -4,16 +4,20 @@ Handoff system for InkArms.
 Creates and recovers handoff documents for session continuity.
 """
 
+import logging
 from datetime import datetime
 
 from inkarms.memory.context import TokenCounter
+from inkarms.memory.storage import MemoryStorage
+from inkarms.memory.summarization import format_conversation, generate_llm_summary
 from inkarms.models.memory import (
     ConversationTurn,
     HandoffDocument,
     Session,
     TurnRole,
 )
-from inkarms.memory.storage import MemoryStorage
+
+logger = logging.getLogger(__name__)
 
 
 HANDOFF_SUMMARY_PROMPT = """Create a comprehensive handoff summary for continuing this conversation.
@@ -79,15 +83,14 @@ class HandoffManager:
         # Generate summary
         summary = await self._generate_summary(session, summary_model)
 
-        # Extract key decisions and pending tasks
-        key_decisions, pending_tasks = await self._extract_tasks(session, summary_model)
-
         # Create handoff document
+        # NOTE: key_decisions and pending_tasks intentionally left empty —
+        # LLM-based extraction would require a separate API call with diminishing returns.
         handoff = HandoffDocument(
             session_id=session.id,
             summary=summary,
-            key_decisions=key_decisions,
-            pending_tasks=pending_tasks,
+            key_decisions=[],
+            pending_tasks=[],
             system_prompt=session.system_prompt,
             recent_turns=recent_turns,
             full_context=session if self.include_full_context else None,
@@ -115,77 +118,14 @@ class HandoffManager:
         Returns:
             Summary text.
         """
-        # Format conversation
-        conversation_lines = []
-        for turn in session.turns[-50:]:  # Last 50 turns max
-            role = turn.role.upper() if isinstance(turn.role, str) else turn.role.value.upper()
-            content = turn.content[:2000]  # Truncate long messages
-            conversation_lines.append(f"{role}: {content}")
-
-        conversation = "\n\n".join(conversation_lines)
-
-        try:
-            from inkarms.providers import get_provider_manager, Message
-
-            manager = get_provider_manager()
-
-            prompt = HANDOFF_SUMMARY_PROMPT.format(conversation=conversation)
-
-            response = await manager.complete(
-                [Message.user(prompt)],
-                model=model,
-                stream=False,
-                max_tokens=1500,
-            )
-
-            return response.content  # type: ignore
-
-        except Exception:
-            # Fallback to simple summary
-            return self._fallback_summary(session)
-
-    def _fallback_summary(self, session: Session) -> str:
-        """Create a simple fallback summary.
-
-        Args:
-            session: Session to summarize.
-
-        Returns:
-            Simple summary.
-        """
-        lines = [
-            f"Session started: {session.metadata.created_at.isoformat()}",
-            f"Total turns: {len(session.turns)}",
-            f"Total tokens: {session.metadata.total_tokens}",
-            "",
-            "Recent conversation:",
-        ]
-
-        # Add last few messages
-        for turn in session.turns[-5:]:
-            role = turn.role.upper() if isinstance(turn.role, str) else turn.role.value.upper()
-            content = turn.content[:200]
-            lines.append(f"  {role}: {content}...")
-
-        return "\n".join(lines)
-
-    async def _extract_tasks(
-        self,
-        session: Session,
-        model: str | None = None,
-    ) -> tuple[list[str], list[str]]:
-        """Extract key decisions and pending tasks.
-
-        Args:
-            session: Session to analyze.
-            model: Model to use.
-
-        Returns:
-            Tuple of (key_decisions, pending_tasks).
-        """
-        # For now, return empty lists - this would use LLM in production
-        # TODO: Implement LLM-based task extraction
-        return [], []
+        # Use last 50 turns with a higher truncation limit for handoffs
+        conversation = format_conversation(session.turns[-50:], max_content_length=2000)
+        return await generate_llm_summary(
+            conversation,
+            prompt_template=HANDOFF_SUMMARY_PROMPT,
+            model=model,
+            max_tokens=1500,
+        )
 
     def check_for_handoff(self) -> HandoffDocument | None:
         """Check if there's a pending handoff to recover.

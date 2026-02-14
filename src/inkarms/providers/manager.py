@@ -198,6 +198,8 @@ class ProviderManager:
             StreamChunk for each response chunk.
         """
         model = kwargs.get("model", "unknown")
+        if model == "unknown":
+            logger.warning("_stream_completion called without model in kwargs")
         response = await acompletion(**kwargs)
         async for chunk in response:  # type: ignore
             if chunk.choices and chunk.choices[0].delta.content:

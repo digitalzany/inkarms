@@ -15,6 +15,7 @@ from inkarms.audit import get_audit_logger
 from inkarms.config import get_config
 from inkarms.memory import get_session_manager
 from inkarms.models.platforms import PlatformType, StreamChunk
+from inkarms.platforms.sessions import PlatformSessionStore
 from inkarms.providers import (
     AllProvidersFailedError,
     AuthenticationError,
@@ -63,6 +64,7 @@ class MessageProcessor:
         skill_manager: SkillManager | None = None,
         event_callback: Callable[[AgentEvent], None] | None = None,
         tool_approval_callback: Callable | None = None,
+        session_store: PlatformSessionStore | None = None,
     ):
         """Initialize the message processor.
 
@@ -70,6 +72,9 @@ class MessageProcessor:
             skill_manager: Optional skill manager (defaults to singleton)
             event_callback: Optional callback for streaming events (tool execution, etc.)
             tool_approval_callback: Optional callback for manual tool approval
+            session_store: Optional per-channel session store. When provided,
+                session_id is used to get a per-channel SessionManager.
+                Falls back to the global singleton when None.
         """
         self._skill_manager = skill_manager or get_skill_manager()
         self._config = get_config()
@@ -77,6 +82,7 @@ class MessageProcessor:
         self._audit_logger = get_audit_logger()
         self._event_callback = event_callback
         self._tool_approval_callback = tool_approval_callback
+        self._session_store = session_store
 
         # Initialize tool registry with built-in tools
         self._tool_registry: ToolRegistry | None = None
@@ -84,6 +90,19 @@ class MessageProcessor:
             self._tool_registry = ToolRegistry()
             sandbox = SandboxExecutor.from_config(self._config.security)
             register_builtin_tools(self._tool_registry, sandbox)
+
+    def _resolve_session_manager(self, session_id: str | None):
+        """Get the appropriate SessionManager for this request.
+
+        When a session_store is configured and session_id is provided,
+        returns a per-channel SessionManager. Otherwise falls back to
+        the global singleton.
+        """
+        if self._session_store and session_id:
+            return self._session_store.get_manager(
+                session_id, model=self._config.providers.default
+            )
+        return self._session_manager
 
     def _build_system_prompt(self, skills: list[Skill]) -> str:
         """Build system prompt with personality and skills."""
@@ -105,8 +124,10 @@ class MessageProcessor:
         query: str,
         skills: list[Skill],
         session_id: str | None = None,
+        session_mgr=None,
     ) -> list[Message]:
         """Build message list for completion."""
+        mgr = session_mgr or self._session_manager
         messages: list[Message] = []
 
         system_prompt = self._build_system_prompt(skills)
@@ -114,9 +135,9 @@ class MessageProcessor:
             messages.append(Message.system(system_prompt))
 
         # Load prior conversation history for platform sessions
-        if session_id and self._session_manager:
+        if session_id and mgr:
             try:
-                for prior_msg in self._session_manager.get_messages(include_system=False):
+                for prior_msg in mgr.get_messages(include_system=False):
                     messages.append(Message(role=prior_msg["role"], content=prior_msg["content"]))
             except Exception as e:
                 logger.error(f"Failed to load session history: {e}")
@@ -124,14 +145,14 @@ class MessageProcessor:
         if session_id:
             try:
                 if system_prompt:
-                    self._session_manager.set_system_prompt(system_prompt)
+                    mgr.set_system_prompt(system_prompt)
             except Exception as e:
-                logger.error(f"Failed to get session manager: {e}")
+                logger.error(f"Failed to set system prompt: {e}")
 
         messages.append(Message.user(query))
-        if self._session_manager:
+        if mgr:
             try:
-                self._session_manager.add_user_message(query)
+                mgr.add_user_message(query)
             except Exception as e:
                 logger.error(f"Failed to add user message to session: {e}")
 
@@ -203,11 +224,13 @@ class MessageProcessor:
         text: str,
         model: str,
         cost: float,
+        session_mgr=None,
     ) -> None:
         """Track assistant response in session manager."""
+        mgr = session_mgr or self._session_manager
         if session_id:
             try:
-                self._session_manager.add_assistant_message(text, model=model, cost=cost)
+                mgr.add_assistant_message(text, model=model, cost=cost)
             except Exception as e:
                 logger.error(f"Failed to track response in session: {e}")
 
@@ -254,8 +277,10 @@ class MessageProcessor:
         session_id,
         platform,
         platform_user_id,
+        session_mgr=None,
     ) -> AsyncIterator[StreamChunk]:
         """Run agent loop and yield progress chunks as events arrive."""
+        mgr = session_mgr or self._session_manager
         try:
             event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
 
@@ -292,21 +317,23 @@ class MessageProcessor:
             summary = manager.get_cost_summary()
             self._track_response(
                 session_id, result.final_response,
-                self._session_manager.model or "unknown",
+                mgr.model or "unknown",
                 summary.total_cost if summary else 0.0,
+                session_mgr=mgr,
             )
             self._log_outgoing(
                 result.final_response, platform, platform_user_id, session_id,
-                self._session_total_tokens(),
+                self._session_total_tokens(session_mgr=mgr),
                 summary.total_cost if summary else 0.0,
             )
         except Exception as e:
             logger.error(f"Agent loop error: {e}", exc_info=True)
             yield StreamChunk(content=f"Error: Agent loop error: {e}", is_final=True)
 
-    def _session_total_tokens(self) -> int:
+    def _session_total_tokens(self, session_mgr=None) -> int:
         """Get total tokens from session metadata, or 0."""
-        meta = self._session_manager.session.metadata
+        mgr = session_mgr or self._session_manager
+        meta = mgr.session.metadata
         return meta.total_tokens if meta else 0
 
     async def process(
@@ -341,9 +368,10 @@ class MessageProcessor:
         """
         self._log_incoming(query, platform, platform_user_id, platform_username, session_id)
 
+        smgr = self._resolve_session_manager(session_id)
         skills = await self._load_skills(query, skill_names, auto_skills)
-        messages = self._build_messages(query, skills, session_id)
-        self._session_manager.set_model(model)
+        messages = self._build_messages(query, skills, session_id, session_mgr=smgr)
+        smgr.set_model(model)
 
         try:
             manager = get_provider_manager()
@@ -361,12 +389,13 @@ class MessageProcessor:
 
                 self._track_response(
                     session_id, result.final_response,
-                    self._session_manager.model or "unknown",
+                    smgr.model or "unknown",
                     summary.total_cost if summary else 0.0,
+                    session_mgr=smgr,
                 )
                 self._log_outgoing(
                     result.final_response, platform, platform_user_id, session_id,
-                    self._session_total_tokens(),
+                    self._session_total_tokens(session_mgr=smgr),
                     summary.total_cost if summary else 0.0,
                 )
 
@@ -394,7 +423,10 @@ class MessageProcessor:
             )
             assert isinstance(response, CompletionResponse)
 
-            self._track_response(session_id, response.content, response.model, response.cost)
+            self._track_response(
+                session_id, response.content, response.model, response.cost,
+                session_mgr=smgr,
+            )
 
             total_tokens = response.usage.input_tokens + response.usage.output_tokens
             self._log_outgoing(
@@ -451,9 +483,10 @@ class MessageProcessor:
         """
         self._log_incoming(query, platform, platform_user_id, platform_username, session_id)
 
+        smgr = self._resolve_session_manager(session_id)
         skills = await self._load_skills(query, skill_names, auto_skills)
-        messages = self._build_messages(query, skills, session_id)
-        self._session_manager.set_model(model)
+        messages = self._build_messages(query, skills, session_id, session_mgr=smgr)
+        smgr.set_model(model)
 
         try:
             manager = get_provider_manager()
@@ -468,6 +501,7 @@ class MessageProcessor:
         if self._config.agent.enable_tools and self._tool_registry:
             async for chunk in self._stream_agent_loop(
                 manager, messages, model, session_id, platform, platform_user_id,
+                session_mgr=smgr,
             ):
                 yield chunk
             return
@@ -490,7 +524,7 @@ class MessageProcessor:
                 try:
                     summary = manager.get_cost_summary()
                     resolved_model = manager.resolve_model(model)
-                    self._session_manager.add_assistant_message(
+                    smgr.add_assistant_message(
                         response_text, model=resolved_model, cost=summary.total_cost,
                     )
                 except Exception as e:
@@ -499,7 +533,7 @@ class MessageProcessor:
             summary = manager.get_cost_summary()
             self._log_outgoing(
                 response_text, platform, platform_user_id, session_id,
-                self._session_total_tokens(),
+                self._session_total_tokens(session_mgr=smgr),
                 summary.total_cost if summary else 0.0,
             )
 

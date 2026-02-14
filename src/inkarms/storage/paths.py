@@ -108,14 +108,24 @@ def get_data_dir() -> Path:
     return get_inkarms_home() / "data"
 
 
+def get_audit_dir() -> Path:
+    """
+    Get the audit log directory.
+
+    Returns:
+        Path to ~/.inkarms/audit/
+    """
+    return get_inkarms_home() / "audit"
+
+
 def get_audit_log_path() -> Path:
     """
     Get the default audit log path.
 
     Returns:
-        Path to ~/.inkarms/audit.jsonl
+        Path to ~/.inkarms/audit/audit.jsonl
     """
-    return get_inkarms_home() / "audit.jsonl"
+    return get_audit_dir() / "audit.jsonl"
 
 
 def get_sqlite_db_path() -> Path:

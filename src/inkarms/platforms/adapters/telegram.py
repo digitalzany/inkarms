@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from inkarms.models.platforms import (
     IncomingMessage,
@@ -21,7 +23,7 @@ try:
     from telegram import Bot, Update
     from telegram.constants import ChatAction, ParseMode
     from telegram.error import TelegramError
-    from telegram.ext import Application, MessageHandler, filters
+    from telegram.ext import Application, CommandHandler, MessageHandler, filters
     TELEGRAM_AVAILABLE = True
 except ImportError:
     TELEGRAM_AVAILABLE = False
@@ -29,6 +31,12 @@ except ImportError:
         "python-telegram-bot not installed. "
         "Install with: pip install python-telegram-bot"
     )
+
+# Type alias for the command callback
+CommandCallback = Callable[
+    [PlatformUser, str, str, str, str],
+    Coroutine[Any, Any, str | None],
+]
 
 
 class TelegramAdapter(PlatformAdapter):
@@ -42,6 +50,7 @@ class TelegramAdapter(PlatformAdapter):
         - allowed_users: List of allowed Telegram user IDs (empty = all users)
         - parse_mode: Message parse mode (MarkdownV2, Markdown, HTML)
         - polling_interval: Seconds between poll requests (default: 2)
+        - command_callback: Async callback for slash command handling
     """
 
     def __init__(
@@ -50,6 +59,7 @@ class TelegramAdapter(PlatformAdapter):
         allowed_users: list[str] | None = None,
         parse_mode: str = "HTML",
         polling_interval: int = 2,
+        command_callback: CommandCallback | None = None,
     ):
         """Initialize Telegram adapter.
 
@@ -58,6 +68,8 @@ class TelegramAdapter(PlatformAdapter):
             allowed_users: List of allowed user IDs (None or empty = all users)
             parse_mode: Telegram parse mode (MarkdownV2, Markdown, HTML)
             polling_interval: Polling interval in seconds
+            command_callback: Async callback(user, command, args, channel_id, message_id)
+                that returns a reply string or None.
         """
         if not TELEGRAM_AVAILABLE:
             raise ImportError(
@@ -71,6 +83,7 @@ class TelegramAdapter(PlatformAdapter):
         self._allowed_users = set(allowed_users) if allowed_users else None
         self._parse_mode = parse_mode
         self._polling_interval = polling_interval
+        self._command_callback = command_callback
 
         self._application: Application | None = None
         self._bot: Bot | None = None
@@ -97,6 +110,14 @@ class TelegramAdapter(PlatformAdapter):
     def capabilities(self) -> PlatformCapabilities:
         return self.CAPABILITIES
 
+    def set_command_callback(self, callback: CommandCallback) -> None:
+        """Set the command callback after construction.
+
+        This allows the router to inject its handle_command method
+        after the adapter is created.
+        """
+        self._command_callback = callback
+
     async def start(self) -> None:
         """Start the Telegram bot with long polling."""
         if self._running:
@@ -109,7 +130,11 @@ class TelegramAdapter(PlatformAdapter):
         self._application = Application.builder().token(self._bot_token).build()
         self._bot = self._application.bot
 
-        # Add message handler
+        # Register command handlers if callback is provided
+        if self._command_callback:
+            self._register_command_handlers()
+
+        # Add message handler (text messages, excluding commands)
         self._application.add_handler(
             MessageHandler(filters.TEXT & ~filters.COMMAND, self._handle_message)
         )
@@ -122,8 +147,98 @@ class TelegramAdapter(PlatformAdapter):
             allowed_updates=Update.ALL_TYPES,
         )
 
+        # Register commands with Telegram so they appear in the menu
+        if self._command_callback:
+            await self._set_bot_commands()
+
         self._running = True
         logger.info("Telegram bot started successfully")
+
+    async def _set_bot_commands(self) -> None:
+        """Register bot commands with Telegram for the UI menu."""
+        from inkarms.commands import CommandRegistry
+
+        try:
+            from telegram import BotCommand
+
+            commands = [
+                BotCommand(cmd.lstrip("/"), desc)
+                for cmd, desc in CommandRegistry.list_commands()
+            ]
+            commands.append(BotCommand("new", "Start a new session"))
+            await self._bot.set_my_commands(commands)
+            logger.info(f"Registered {len(commands)} bot commands with Telegram")
+        except Exception as e:
+            logger.warning(f"Failed to set bot commands: {e}")
+
+    def _register_command_handlers(self) -> None:
+        """Register Telegram command handlers for shared slash commands."""
+        from inkarms.commands import CommandRegistry
+
+        # Register handlers for all shared commands + /new
+        command_names = [
+            cmd.lstrip("/") for cmd, _ in CommandRegistry.list_commands()
+        ] + ["new"]
+
+        for cmd_name in command_names:
+            self._application.add_handler(
+                CommandHandler(cmd_name, self._handle_command)
+            )
+
+        logger.info(f"Registered {len(command_names)} command handlers")
+
+    async def _handle_command(self, update: Update, context: Any) -> None:
+        """Handle an incoming slash command from Telegram.
+
+        Args:
+            update: Telegram update object
+            context: Telegram context
+        """
+        if not update.message or not update.message.text:
+            return
+
+        message = update.message
+        user_id = str(message.from_user.id)
+
+        # Check user whitelist
+        if self._allowed_users and user_id not in self._allowed_users:
+            logger.warning(f"Rejected command from unauthorized user: {user_id}")
+            await message.reply_text(
+                "Sorry, you are not authorized to use this bot.",
+                parse_mode=None,
+            )
+            return
+
+        # Parse command and args
+        text = message.text
+        parts = text.split(maxsplit=1)
+        command = parts[0].lower()
+        # Telegram commands may include @botname, strip it
+        if "@" in command:
+            command = command.split("@")[0]
+        args = parts[1].strip() if len(parts) > 1 else ""
+
+        # Build platform user
+        platform_user = PlatformUser(
+            platform=PlatformType.TELEGRAM,
+            platform_user_id=user_id,
+            username=message.from_user.username,
+            display_name=message.from_user.full_name,
+        )
+
+        channel_id = str(message.chat_id)
+        message_id = str(message.message_id)
+
+        if self._command_callback:
+            try:
+                reply = await self._command_callback(
+                    platform_user, command, args, channel_id, message_id,
+                )
+                if reply:
+                    await message.reply_text(reply, parse_mode=None)
+            except Exception as e:
+                logger.error(f"Command callback error: {e}", exc_info=True)
+                await message.reply_text(f"Error: {e}", parse_mode=None)
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
@@ -171,7 +286,7 @@ class TelegramAdapter(PlatformAdapter):
             display_name=message.from_user.full_name,
         )
 
-        # Create incoming message
+        # Create incoming message with correct channel_id
         incoming_msg = IncomingMessage(
             platform=PlatformType.TELEGRAM,
             user=platform_user,
@@ -184,6 +299,7 @@ class TelegramAdapter(PlatformAdapter):
                 else None
             ),
             metadata={
+                "channel_id": str(message.chat_id),
                 "chat_id": str(message.chat_id),
                 "chat_type": message.chat.type,
             },

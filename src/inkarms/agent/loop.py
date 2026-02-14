@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Any
 
 from inkarms.agent.parser import ToolCallParser
+from inkarms.audit.logger import get_audit_logger
 from inkarms.models.agent import AgentConfig, AgentEvent, ApprovalMode, EventType
 from inkarms.models.tools import ToolCall, ToolResult
 from inkarms.providers.manager import ProviderManager
@@ -465,6 +466,15 @@ class AgentLoop:
             data={"tool_input": tool_call.input},
         )
 
+        # Audit: log tool start
+        audit = get_audit_logger()
+        audit.log_tool_start(
+            tool_name=tool.name,
+            tool_call_id=tool_call.id,
+            parameters=tool_call.input,
+            is_dangerous=tool.is_dangerous,
+        )
+
         # Execute tool with metrics
         return await self._run_tool(tool, tool_call, iteration)
 
@@ -531,6 +541,11 @@ class AgentLoop:
             EventType.TOOL_DENIED, tool.name, tool_call.id,
             f"Tool execution denied: {tool.name}", iteration,
         )
+        get_audit_logger().log_tool_denied(
+            tool_name=tool.name,
+            tool_call_id=tool_call.id,
+            reason="denied by user",
+        )
         return ToolResult(
             tool_call_id=tool_call.id,
             output="",
@@ -541,9 +556,10 @@ class AgentLoop:
     async def _run_tool(
         self, tool: Tool, tool_call: ToolCall, iteration: int,
     ) -> ToolResult:
-        """Execute tool, record metrics, and emit result events."""
+        """Execute tool, record metrics, emit events, and audit log."""
         logger.info(f"Executing tool: {tool.name}")
         start_time = time.time()
+        audit = get_audit_logger()
 
         try:
             result = await tool.execute(tool_call_id=tool_call.id, **tool_call.input)
@@ -557,12 +573,18 @@ class AgentLoop:
                 error_message=result.error if result.is_error else None,
             )
 
-            # Emit completion or error event
+            # Emit completion or error event and audit
             if result.is_error:
                 self._emit_tool_event(
                     EventType.TOOL_ERROR, tool.name, tool_call.id,
                     f"Tool failed: {tool.name}", iteration,
                     data={"error": result.error, "execution_time": execution_time},
+                )
+                audit.log_tool_error(
+                    tool_name=tool.name,
+                    tool_call_id=tool_call.id,
+                    execution_time=execution_time,
+                    error=result.error or "unknown error",
                 )
             else:
                 self._emit_tool_event(
@@ -572,6 +594,12 @@ class AgentLoop:
                         "output_preview": result.output[:100] if result.output else "",
                         "execution_time": execution_time,
                     },
+                )
+                audit.log_tool_complete(
+                    tool_name=tool.name,
+                    tool_call_id=tool_call.id,
+                    execution_time=execution_time,
+                    output_preview=result.output[:200] if result.output else "",
                 )
 
             return result
@@ -591,6 +619,12 @@ class AgentLoop:
                 EventType.TOOL_ERROR, tool.name, tool_call.id,
                 f"Tool exception: {tool.name}", iteration,
                 data={"exception": str(e), "execution_time": execution_time},
+            )
+            audit.log_tool_error(
+                tool_name=tool.name,
+                tool_call_id=tool_call.id,
+                execution_time=execution_time,
+                error=str(e),
             )
             return ToolResult(
                 tool_call_id=tool_call.id,

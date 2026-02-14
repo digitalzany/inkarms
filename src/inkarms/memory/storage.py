@@ -58,6 +58,18 @@ class MemoryStorage:
         ]:
             path.mkdir(parents=True, exist_ok=True)
 
+    @staticmethod
+    def _atomic_write(path: Path, data: str) -> None:
+        """Write data to a file atomically using a temp file and os.replace.
+
+        Args:
+            path: Target file path.
+            data: String data to write.
+        """
+        tmp_path = path.with_suffix(".tmp")
+        tmp_path.write_text(data)
+        tmp_path.replace(path)
+
     def _serialize_session(self, session: Session) -> dict[str, Any]:
         """Serialize a session to dict.
 
@@ -141,7 +153,7 @@ class MemoryStorage:
         path = self.get_daily_path(date)
         data = self._serialize_session(session)
 
-        path.write_text(json.dumps(data, indent=2, default=str))
+        self._atomic_write(path, json.dumps(data, indent=2, default=str))
         return path
 
     def load_daily_session(self, date: datetime | None = None) -> Session | None:
@@ -164,23 +176,10 @@ class MemoryStorage:
         except (json.JSONDecodeError, KeyError):
             return None
 
-    def append_to_daily(self, turn: ConversationTurn, date: datetime | None = None) -> None:
-        """Append a turn to the daily session.
-
-        Args:
-            turn: Turn to append.
-            date: Date for the file. Defaults to today.
-        """
-        session = self.load_daily_session(date)
-
-        if session is None:
-            session = Session()
-
-        session.add_turn(turn)
-        self.save_daily_session(session, date)
-
     def list_daily_sessions(self) -> list[MemoryEntry]:
         """List all daily session files.
+
+        Reads only metadata from each file instead of deserializing the full session.
 
         Returns:
             List of memory entries.
@@ -192,20 +191,19 @@ class MemoryStorage:
                 date_str = path.stem  # e.g., "2026-02-02"
                 date = datetime.strptime(date_str, "%Y-%m-%d")
 
-                # Load to get metadata
-                session = self.load_daily_session(date)
-                if session:
-                    entries.append(
-                        MemoryEntry(
-                            id=date_str,
-                            name=date_str,
-                            memory_type=MemoryType.DAILY,
-                            created_at=date,
-                            path=str(path),
-                            turn_count=len(session.turns),
-                            total_tokens=session.metadata.total_tokens,
-                        )
+                data = json.loads(path.read_text())
+                metadata = data.get("metadata", {})
+                entries.append(
+                    MemoryEntry(
+                        id=date_str,
+                        name=date_str,
+                        memory_type=MemoryType.DAILY,
+                        created_at=date,
+                        path=str(path),
+                        turn_count=metadata.get("turn_count", 0),
+                        total_tokens=metadata.get("total_tokens", 0),
                     )
+                )
             except (ValueError, json.JSONDecodeError):
                 continue
 
@@ -237,7 +235,7 @@ class MemoryStorage:
             "session": self._serialize_session(snapshot.session),
         }
 
-        path.write_text(json.dumps(data, indent=2, default=str))
+        self._atomic_write(path, json.dumps(data, indent=2, default=str))
         return path
 
     def load_snapshot(self, name: str) -> Snapshot | None:
@@ -355,7 +353,7 @@ class MemoryStorage:
             "recovered_at": (handoff.recovered_at.isoformat() if handoff.recovered_at else None),
         }
 
-        path.write_text(json.dumps(data, indent=2, default=str))
+        self._atomic_write(path, json.dumps(data, indent=2, default=str))
         return path
 
     def load_latest_handoff(self) -> HandoffDocument | None:

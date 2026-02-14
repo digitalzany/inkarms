@@ -137,6 +137,13 @@ class ContextConfig(BaseModel):
     memory_path: str = "~/.inkarms/memory"
     daily_logs: bool = True
     handoff: HandoffConfig = Field(default_factory=HandoffConfig)
+    session_chains: list[list[str]] = Field(
+        default_factory=list,
+        description=(
+            "Groups of channel identifiers that share the same active session. "
+            "E.g. [['cli', 'telegram'], ['slack:#dev', 'discord:#dev']]"
+        ),
+    )
 
 
 # =============================================================================
@@ -162,7 +169,7 @@ class AuditLogConfig(BaseModel):
     """Audit logging configuration."""
 
     enable: bool = True
-    path: str = "~/.inkarms/audit.jsonl"
+    path: str = "~/.inkarms/audit/audit.jsonl"
     rotation: Literal["daily", "weekly", "size"] = "daily"
     max_size_mb: int = 100
     retention_days: int = Field(default=90, ge=1, le=365)

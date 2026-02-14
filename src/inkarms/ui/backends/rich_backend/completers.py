@@ -5,28 +5,23 @@ from __future__ import annotations
 from prompt_toolkit.completion import Completer, Completion
 from prompt_toolkit.lexers import Lexer
 
+from inkarms.commands import CommandRegistry
+
+# TUI-only navigation commands (not in the shared registry)
+_TUI_COMMANDS = [
+    ("/menu", "Return to main menu"),
+    ("/dashboard", "Show dashboard"),
+    ("/sessions", "Manage sessions"),
+    ("/config", "Open configuration"),
+    ("/quit", "Exit InkArms"),
+    ("/chat", "Go to chat"),
+]
+
 
 class CommandCompleter(Completer):
     """Completer for slash commands with fuzzy matching."""
 
-    COMMANDS = [
-        ("/help", "Show available commands"),
-        ("/menu", "Return to main menu"),
-        ("/dashboard", "Show dashboard"),
-        ("/sessions", "Manage sessions"),
-        ("/config", "Open configuration"),
-        ("/clear", "Clear current session"),
-        ("/usage", "Show token usage"),
-        ("/status", "Show current status"),
-        ("/model", "Show/change model"),
-        ("/quit", "Exit InkArms"),
-        ("/save", "Save session"),
-        ("/load", "Load session"),
-        ("/history", "Show message history"),
-        ("/chat", "Go to chat"),
-        ("/tools", "Show registered tools"),
-        ("/agent", "Show/change agent settings"),
-    ]
+    COMMANDS = CommandRegistry.list_commands() + _TUI_COMMANDS
 
     def _fuzzy_match(self, text: str, cmd: str) -> bool:
         if cmd.startswith(text):

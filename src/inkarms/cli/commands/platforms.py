@@ -27,7 +27,8 @@ from inkarms.platforms.adapters.protocol import PlatformAdapter
 from inkarms.platforms.processor import MessageProcessor
 from inkarms.platforms.rate_limiter import get_rate_limiter
 from inkarms.platforms.router import MessageRouter
-from inkarms.platforms.session_mapper import get_session_mapper
+from inkarms.platforms.session_mapper import SessionMapper
+from inkarms.platforms.sessions import PlatformSessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -193,21 +194,30 @@ async def _start_platform_service(platform_filter: str | None = None) -> None:
             )
             raise typer.Exit(1)
 
+    # Create session mapper with chain config
+    session_mapper = SessionMapper(chains=config.context.session_chains)
+
+    # Create session store for per-channel persistence
+    session_store = PlatformSessionStore()
+
     # Create router with all dependencies injected
     router = MessageRouter(
         max_concurrent_tasks=config.platforms.max_concurrent_sessions,
         processor=MessageProcessor(
             event_callback=_platform_event_callback,
             tool_approval_callback=lambda _tool_call, _tool: True,
+            session_store=session_store,
         ),
-        session_mapper=get_session_mapper(),
+        session_mapper=session_mapper,
         rate_limiter=get_rate_limiter(
             max_tokens=config.platforms.rate_limit_per_user,
             refill_rate=1.0,
             refill_interval=60.0,
         ),
+        session_store=session_store,
     )
 
+    # register_adapter() auto-injects command callback into supported adapters
     for adapter in all_adapters:
         router.register_adapter(adapter)
 
