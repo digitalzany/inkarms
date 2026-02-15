@@ -53,9 +53,9 @@ inkarms run [OPTIONS] [QUERY]
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--model` | `-m` | TEXT | config | Model to use (name or alias) |
-| `--task` | `-t` | TEXT | auto | Task type (not yet implemented) |
-| `--skill` | `-s` | TEXT | auto | Explicitly load a skill (not yet implemented) |
-| `--deep` | `-d` | FLAG | false | Enable deep thinking chain (not yet implemented) |
+| `--task` | `-t` | TEXT | auto | Task type (planned) |
+| `--skill` | `-s` | TEXT | | Explicitly load a skill by name |
+| `--deep` | `-d` | FLAG | false | Enable deep thinking chain (planned) |
 | `--approve` | `-a` | FLAG | false | Require approval for commands |
 | `--stream/--no-stream` | | FLAG | stream | Stream response |
 | `--yes` | `-y` | FLAG | false | Skip confirmations |
@@ -65,6 +65,10 @@ inkarms run [OPTIONS] [QUERY]
 | `--json` | | FLAG | false | Output as JSON |
 | `--temperature` | | FLOAT | 0.7 | Sampling temperature (0.0-2.0) |
 | `--max-tokens` | | INT | | Maximum tokens in response |
+| `--tools/--no-tools` | | FLAG | false | Enable tool use (function calling) |
+| `--tool-approval` | | TEXT | manual | Tool approval mode: auto, manual, or disabled |
+| `--no-memory` | | FLAG | false | Don't track this query in session memory |
+| `--new-session` | | FLAG | false | Start a fresh session |
 
 ### Examples
 
@@ -75,6 +79,9 @@ inkarms run "Explain quantum computing"
 # With specific model (alias or full name)
 inkarms run --model fast "Write a haiku"
 inkarms run --model openai/gpt-4 "Write a haiku"
+
+# Enable tools and auto-approve
+inkarms run "Check git status" --tools --tool-approval auto
 
 # Include context file
 inkarms run --context ./main.py "Explain this code"
@@ -304,7 +311,7 @@ inkarms skill search QUERY [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--remote` | Search remote registries |
+| `--max` | Maximum number of results |
 
 ### inkarms skill show
 
@@ -316,7 +323,7 @@ inkarms skill show NAME
 
 ### inkarms skill install
 
-Install a skill.
+Install a skill from a local path.
 
 ```bash
 inkarms skill install SOURCE [OPTIONS]
@@ -324,7 +331,7 @@ inkarms skill install SOURCE [OPTIONS]
 
 | Argument | Description |
 |----------|-------------|
-| `SOURCE` | Skill source (github:user/repo/skill, URL, or path) |
+| `SOURCE` | Skill source (local path) |
 
 | Option | Short | Description |
 |--------|-------|-------------|
@@ -333,13 +340,6 @@ inkarms skill install SOURCE [OPTIONS]
 #### Source Formats
 
 ```bash
-# From GitHub
-inkarms skill install github:user/repo/skill-name
-inkarms skill install github:user/repo/skill-name@v1.0.0
-
-# From URL
-inkarms skill install https://github.com/user/repo
-
 # From local path
 inkarms skill install ./my-skill
 inkarms skill install /absolute/path/to/skill
@@ -637,6 +637,56 @@ inkarms audit export [OPTIONS]
 | `--since` | | Start time |
 | `--type` | | Event type filter |
 | `--session` | | Session filter |
+
+---
+
+## inkarms platforms
+
+Manage multi-platform messaging adapters.
+
+```bash
+inkarms platforms [COMMAND]
+```
+
+### inkarms platforms list
+
+List available platforms and their configuration status.
+
+```bash
+inkarms platforms list
+```
+
+### inkarms platforms start
+
+Start platform message service.
+
+```bash
+inkarms platforms start [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--platform` | `-p` | Start specific platform (e.g., telegram) |
+
+### inkarms platforms stop
+
+Stop platform message service (placeholder for future daemon support).
+
+```bash
+inkarms platforms stop [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--platform` | `-p` | Stop specific platform |
+
+### inkarms platforms status
+
+Show platform health status.
+
+```bash
+inkarms platforms status
+```
 
 ---
 

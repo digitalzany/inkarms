@@ -12,12 +12,14 @@ from inkarms.tools.registry import ToolRegistry
 # Optional tools (require extra dependencies)
 try:
     from inkarms.tools.builtin.python import PythonEvalTool
+
     PYTHON_EVAL_AVAILABLE = True
 except ImportError:
     PYTHON_EVAL_AVAILABLE = False
 
 try:
     from inkarms.tools.builtin.git import GitOperationsTool
+
     GIT_AVAILABLE = True
 except ImportError:
     GIT_AVAILABLE = False
@@ -52,12 +54,18 @@ def register_builtin_tools(
     # Python eval tool (dangerous, optional)
     tools_count = 6
     if PYTHON_EVAL_AVAILABLE:
+        # We know PythonEvalTool is defined if PYTHON_EVAL_AVAILABLE is True
+        from inkarms.tools.builtin.python import PythonEvalTool  # type: ignore
+
         registry.register(PythonEvalTool())
         tools_count += 1
         logger.debug("Registered Python eval tool (requires RestrictedPython)")
 
     # Git operations tool (dangerous, optional)
     if GIT_AVAILABLE:
+        # We know GitOperationsTool is defined if GIT_AVAILABLE is True
+        from inkarms.tools.builtin.git import GitOperationsTool  # type: ignore
+
         registry.register(GitOperationsTool())
         tools_count += 1
         logger.debug("Registered Git operations tool (requires GitPython)")

@@ -37,6 +37,37 @@ All tools support:
 
 ## Built-in Tools
 
+### Search Files Tool
+
+Search for files by name or content within a directory.
+
+**Capabilities:**
+- Find files matching a glob pattern (e.g., `*.py`)
+- Search file contents using regex (grep-like)
+- Case-sensitive or insensitive search
+- Filter content search by file extension
+
+**Example Usage:**
+
+```bash
+# Find all Python files
+inkarms run "Find all python files in src/" --tools --tool-approval auto
+
+# Search for a specific function definition
+inkarms run "Find where 'def connect_db' is defined" --tools --tool-approval auto
+```
+
+**Tool Parameters:**
+
+- `path`: Directory to search in (default: ".")
+- `pattern`: Glob pattern (if content_search=False) or Regex pattern (if content_search=True)
+- `content_search`: Boolean to toggle between filename and content search
+- `case_sensitive`: Boolean for case sensitivity
+- `file_pattern`: Glob pattern to filter files during content search
+
+**Security Notes:**
+- This is a safe, read-only tool.
+
 ### HTTP Request Tool
 
 Make HTTP requests to web APIs with full control over methods, headers, and authentication.

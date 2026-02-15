@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import re
+import time
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -87,6 +89,8 @@ class TelegramAdapter(PlatformAdapter):
 
         self._application: Application | None = None
         self._bot: Bot | None = None
+        self._last_stream_edit: dict[str, float] = {}
+        self._stream_edit_interval = 1.0  # min seconds between edits per chat
 
     CAPABILITIES = PlatformCapabilities(
         supports_streaming=True,
@@ -338,6 +342,14 @@ class TelegramAdapter(PlatformAdapter):
                 else None
             )
 
+            max_len = self.CAPABILITIES.max_message_length or 4096
+
+            # Split long messages into multiple sends
+            if len(formatted_content) > max_len:
+                return await self._send_split_message(
+                    destination_id, formatted_content, parse_mode, reply_to,
+                )
+
             try:
                 sent_message = await self._bot.send_message(
                     chat_id=destination_id,
@@ -363,6 +375,40 @@ class TelegramAdapter(PlatformAdapter):
             logger.error(f"Failed to send Telegram message: {e}")
             raise
 
+    async def _send_split_message(
+        self,
+        destination_id: str,
+        text: str,
+        parse_mode: str | None,
+        reply_to: int | None,
+    ) -> str:
+        """Split a long message and send as multiple Telegram messages."""
+        max_len = self.CAPABILITIES.max_message_length or 4096
+        parts = self._split_html_message(text, max_len)
+
+        sent_message = None
+        for part in parts:
+            try:
+                sent_message = await self._bot.send_message(
+                    chat_id=destination_id,
+                    text=part,
+                    parse_mode=parse_mode,
+                    reply_to_message_id=reply_to,
+                )
+            except TelegramError as parse_err:
+                if "can't parse entities" in str(parse_err).lower():
+                    sent_message = await self._bot.send_message(
+                        chat_id=destination_id,
+                        text=part,
+                        parse_mode=None,
+                        reply_to_message_id=reply_to,
+                    )
+                else:
+                    raise
+            reply_to = None  # Only first part replies to original
+
+        return str(sent_message.message_id) if sent_message else ""
+
     async def send_streaming_chunk(
         self,
         destination_id: str,
@@ -373,51 +419,196 @@ class TelegramAdapter(PlatformAdapter):
         if not self._bot:
             raise RuntimeError("Bot not initialized")
 
+        # Throttle edits to avoid Telegram flood control (~1 edit/sec per chat)
+        now = time.monotonic()
+        last_edit = self._last_stream_edit.get(destination_id, 0)
+        if not chunk.is_final and message_id is not None and (now - last_edit) < self._stream_edit_interval:
+            return message_id  # Skip this edit, too soon
+
         try:
             formatted_content = self.format_output(chunk.content, "markdown")
+            max_len = self.CAPABILITIES.max_message_length or 4096
 
-            if message_id is None:
-                try:
-                    sent_message = await self._bot.send_message(
-                        chat_id=destination_id,
-                        text=formatted_content,
-                        parse_mode=ParseMode.HTML,
+            # Truncate during streaming to stay within Telegram's limit
+            if len(formatted_content) > max_len:
+                if chunk.is_final:
+                    result = await self._send_final_overflow(
+                        destination_id, formatted_content, max_len, message_id,
                     )
-                except TelegramError as parse_err:
-                    if "can't parse entities" in str(parse_err).lower():
-                        sent_message = await self._bot.send_message(
-                            chat_id=destination_id,
-                            text=chunk.content,
-                            parse_mode=None,
-                        )
-                    else:
-                        raise
-                return str(sent_message.message_id)
-            else:
-                try:
-                    await self._bot.edit_message_text(
-                        chat_id=destination_id,
-                        message_id=int(message_id),
-                        text=formatted_content,
-                        parse_mode=ParseMode.HTML,
-                    )
-                except TelegramError as parse_err:
-                    if "can't parse entities" in str(parse_err).lower():
-                        await self._bot.edit_message_text(
-                            chat_id=destination_id,
-                            message_id=int(message_id),
-                            text=chunk.content,
-                            parse_mode=None,
-                        )
-                    else:
-                        raise
-                return message_id
+                    self._last_stream_edit[destination_id] = time.monotonic()
+                    return result
+                formatted_content = formatted_content[: max_len - 20] + "\n\n<i>…sending</i>"
+
+            fallback_text = chunk.content[:max_len]
+            result = await self._send_or_edit_chunk(
+                destination_id, formatted_content, fallback_text, message_id,
+            )
+            self._last_stream_edit[destination_id] = time.monotonic()
+            return result
 
         except TelegramError as e:
-            # If edit fails (message unchanged), ignore
             if "message is not modified" not in str(e).lower():
                 logger.error(f"Failed to send streaming chunk: {e}")
             return message_id or ""
+
+    async def _send_or_edit_chunk(
+        self,
+        destination_id: str,
+        html_text: str,
+        fallback_text: str,
+        message_id: str | None,
+    ) -> str:
+        """Send a new message or edit an existing one, with HTML parse fallback."""
+        if message_id is None:
+            try:
+                sent = await self._bot.send_message(
+                    chat_id=destination_id, text=html_text, parse_mode=ParseMode.HTML,
+                )
+            except TelegramError as e:
+                if "can't parse entities" not in str(e).lower():
+                    raise
+                sent = await self._bot.send_message(
+                    chat_id=destination_id, text=fallback_text, parse_mode=None,
+                )
+            return str(sent.message_id)
+
+        try:
+            await self._bot.edit_message_text(
+                chat_id=destination_id, message_id=int(message_id),
+                text=html_text, parse_mode=ParseMode.HTML,
+            )
+        except TelegramError as e:
+            if "can't parse entities" not in str(e).lower():
+                raise
+            await self._bot.edit_message_text(
+                chat_id=destination_id, message_id=int(message_id),
+                text=fallback_text, parse_mode=None,
+            )
+        return message_id
+
+    async def _send_final_overflow(
+        self,
+        destination_id: str,
+        formatted_content: str,
+        max_len: int,
+        message_id: str | None,
+    ) -> str:
+        """Handle a final streaming chunk that exceeds the message length limit.
+
+        Edits the existing message with the first part and sends overflow as new messages.
+        """
+        parts = self._split_html_message(formatted_content, max_len)
+        first_part = parts[0]
+        overflow_parts = parts[1:]
+
+        # Edit existing message with first part (or send new if no message_id)
+        await self._send_or_edit_chunk(
+            destination_id, first_part, first_part, message_id,
+        )
+
+        # Send overflow as new message(s)
+        sent_message = None
+        for part in overflow_parts:
+            try:
+                sent_message = await self._bot.send_message(
+                    chat_id=destination_id,
+                    text=part,
+                    parse_mode=ParseMode.HTML,
+                )
+            except TelegramError as parse_err:
+                if "can't parse entities" in str(parse_err).lower():
+                    sent_message = await self._bot.send_message(
+                        chat_id=destination_id,
+                        text=part,
+                        parse_mode=None,
+                    )
+                else:
+                    raise
+
+        return str(sent_message.message_id) if sent_message else message_id or ""
+
+    # --- HTML-aware message splitting ---
+
+    @staticmethod
+    def _split_html_message(text: str, max_len: int) -> list[str]:
+        """Split a long HTML message into parts that respect tag boundaries.
+
+        Splits at newlines (preferred) or spaces, and properly closes/re-opens
+        HTML tags across message boundaries so each part is valid HTML.
+        """
+        if len(text) <= max_len:
+            return [text]
+
+        parts: list[str] = []
+        remaining = text
+        # Reserve space for closing tags we may need to append
+        effective_len = max_len - 50
+
+        while remaining:
+            if len(remaining) <= max_len:
+                parts.append(remaining)
+                break
+
+            split_at = TelegramAdapter._find_split_point(remaining, effective_len)
+            part = remaining[:split_at]
+            remaining = remaining[split_at:]
+
+            # Strip a single leading newline (the split point itself)
+            if remaining.startswith("\n"):
+                remaining = remaining[1:]
+
+            # Balance HTML tags: close open tags in this part, re-open in next
+            open_tags = TelegramAdapter._get_open_tags(part)
+            if open_tags:
+                for tag in reversed(open_tags):
+                    part += f"</{tag}>"
+                remaining = "".join(f"<{tag}>" for tag in open_tags) + remaining
+
+            parts.append(part)
+
+        return parts
+
+    @staticmethod
+    def _find_split_point(text: str, max_len: int) -> int:
+        """Find a good point to split text, avoiding mid-tag cuts."""
+        if len(text) <= max_len:
+            return len(text)
+
+        pos = max_len
+
+        # Don't split inside an HTML tag (between < and >)
+        last_open = text.rfind("<", 0, pos)
+        last_close = text.rfind(">", 0, pos)
+        if last_open > last_close:
+            pos = last_open
+
+        # Prefer splitting at a newline
+        last_newline = text.rfind("\n", 0, pos)
+        if last_newline > pos // 2:
+            return last_newline + 1
+
+        # Then at a space
+        last_space = text.rfind(" ", 0, pos)
+        if last_space > pos // 2:
+            return last_space + 1
+
+        return pos
+
+    @staticmethod
+    def _get_open_tags(html: str) -> list[str]:
+        """Get list of HTML tags that are opened but not closed."""
+        open_tags: list[str] = []
+        for match in re.finditer(r"<(/?)(\w+)[^>]*>", html):
+            is_closing = match.group(1) == "/"
+            tag_name = match.group(2)
+            if is_closing:
+                for i in range(len(open_tags) - 1, -1, -1):
+                    if open_tags[i] == tag_name:
+                        open_tags.pop(i)
+                        break
+            else:
+                open_tags.append(tag_name)
+        return open_tags
 
     async def send_typing_indicator(self, destination_id: str) -> None:
         """Send typing indicator."""

@@ -114,15 +114,34 @@ class QueryProcessor:
         cost_before = self._get_cost_before()
 
         async def run(loop: asyncio.AbstractEventLoop) -> Any:
+            from datetime import datetime
+
             from inkarms.agent.loop import AgentLoop
+            from inkarms.models.agent import AgentEvent, EventType
+
+            # Wrapper for TUI streaming to match new AgentLoop contract
+            def _stream_wrapper(text: str):
+                if on_chunk:
+                    on_chunk(text)
+                # We also need to emit a STREAM_CHUNK event so the event_callback sees it
+                # (ChatView relies on on_chunk for text, but consistency is good)
+                if event_callback:
+                    event_callback(
+                        AgentEvent(
+                            event_type=EventType.STREAM_CHUNK,
+                            iteration=0,
+                            message=text,
+                            timestamp=datetime.now().isoformat(),
+                        )
+                    )
 
             agent_loop = AgentLoop(
                 provider_manager=self._provider,
-                tool_registry=self._tool_registry,
+                tool_registry=self._tool_registry,  # type: ignore
                 config=self._agent_config,
                 approval_callback=approval_callback,
                 event_callback=event_callback,
-                stream_callback=on_chunk,
+                stream_callback=_stream_wrapper if on_chunk else None,
             )
             return await agent_loop.run(msg_dicts, model=self._status.model)
 
@@ -196,6 +215,7 @@ class QueryProcessor:
         on_error: Callable[[str], None],
     ) -> threading.Thread:
         """Run an async function in a daemon thread with proper loop lifecycle."""
+
         def run():
             warnings.filterwarnings("ignore", category=RuntimeWarning)
             loop = asyncio.new_event_loop()
@@ -212,9 +232,7 @@ class QueryProcessor:
                     for task in pending:
                         task.cancel()
                     if pending:
-                        loop.run_until_complete(
-                            asyncio.gather(*pending, return_exceptions=True)
-                        )
+                        loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                 with contextlib.suppress(Exception):
                     loop.run_until_complete(loop.shutdown_asyncgens())
                 loop.close()

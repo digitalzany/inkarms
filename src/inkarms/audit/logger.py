@@ -494,9 +494,14 @@ class AuditLogger:
             data["username"] = username
 
         if self.include_queries:
-            data["message"] = message if not self.hash_queries else self._hash_text(message)
+            # We explicitly cast to str or handle potential non-str types if needed,
+            # though the signature says 'message' is str.
+            msg_content = message if not self.hash_queries else self._hash_text(message)
+            # data is dict[str, Any], so this assignment is valid in Python but mypy might be confused
+            # by previous usage or inference. We force it.
+            data.update({"message": str(msg_content)})
         else:
-            data["message_hash"] = self._hash_text(message)
+            data.update({"message_hash": self._hash_text(message)})
 
         event = self._create_event(AuditEventType.PLATFORM_MESSAGE_RECEIVED, data)
         self._write_event(event)

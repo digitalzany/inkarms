@@ -166,18 +166,18 @@ class SummarizeCompactor(BaseCompactor):
     """
 
     SUMMARY_PROMPT = """Summarize the following conversation history concisely.
-Focus on:
-- Key decisions made
-- Important context established
-- Pending tasks or questions
-- Technical details that may be needed later
-
-Keep the summary under {max_tokens} tokens.
-
-Conversation:
-{conversation}
-
-Summary:"""
+    Focus on:
+    - Key decisions made
+    - Important context established
+    - Pending tasks or questions
+    - Technical details that may be needed later
+    
+    Keep the summary under {max_tokens} tokens.
+    
+    Conversation:
+    {conversation}
+    
+    Summary:"""
 
     def __init__(
         self,

@@ -7,7 +7,12 @@ import logging
 import uuid
 
 from inkarms.commands import CommandContext, CommandRegistry
-from inkarms.models.platforms import IncomingMessage, OutgoingMessage, PlatformUser
+from inkarms.models.platforms import (
+    IncomingMessage,
+    OutgoingMessage,
+    PlatformUser,
+    StreamChunk,
+)
 from inkarms.platforms.adapters.protocol import PlatformAdapter
 from inkarms.platforms.processor import MessageProcessor
 from inkarms.platforms.rate_limiter import RateLimiter, RateLimitExceeded
@@ -145,9 +150,7 @@ class MessageRouter:
         except Exception as e:
             logger.error(f"Error listening to {platform_name}: {e}", exc_info=True)
 
-    async def _handle_message(
-        self, adapter: PlatformAdapter, message: IncomingMessage
-    ) -> None:
+    async def _handle_message(self, adapter: PlatformAdapter, message: IncomingMessage) -> None:
         """Handle an incoming message with semaphore-limited concurrency."""
         if self._semaphore:
             async with self._semaphore:
@@ -159,9 +162,7 @@ class MessageRouter:
         """Resolve the destination_id for sending replies."""
         return message.metadata.get("channel_id", message.user.platform_user_id)
 
-    async def _process_message(
-        self, adapter: PlatformAdapter, message: IncomingMessage
-    ) -> None:
+    async def _process_message(self, adapter: PlatformAdapter, message: IncomingMessage) -> None:
         """Process a message through the full lifecycle."""
         destination_id = self._resolve_destination(message)
         channel_id = message.metadata.get("channel_id")
@@ -170,7 +171,9 @@ class MessageRouter:
         session_id = None
         if self._session_mapper:
             session_id = self._session_mapper.get_session_id(
-                message.user, channel_id=channel_id, create_if_missing=True,
+                message.user,
+                channel_id=channel_id,
+                create_if_missing=True,
             )
 
         # Check rate limit
@@ -204,6 +207,16 @@ class MessageRouter:
                 await self._process_non_streaming(adapter, message, destination_id, session_id)
         except Exception as e:
             logger.error(f"Failed to process message: {e}", exc_info=True)
+            try:
+                await adapter.send_message(
+                    destination_id,
+                    OutgoingMessage(
+                        content="Sorry, an error occurred while processing your message.",
+                        format="plain",
+                    ),
+                )
+            except Exception:
+                logger.error("Failed to send error message to user")
 
     async def _process_streaming(
         self,
@@ -213,7 +226,12 @@ class MessageRouter:
         session_id: str | None,
     ) -> None:
         """Process a message with streaming response."""
+        if not self._processor:
+            return
+
         message_id = None
+        full_text = ""
+
         async for chunk in self._processor.process_streaming(
             query=message.content,
             session_id=session_id,
@@ -221,8 +239,43 @@ class MessageRouter:
             platform_user_id=message.user.platform_user_id,
             platform_username=message.user.username,
         ):
+            # Accumulate text content
+            # Text chunks have empty metadata (or just event_type=stream_chunk which we treat as content)
+            is_text_chunk = not chunk.metadata or chunk.metadata.get("event_type") == "stream_chunk"
+
+            if chunk.is_final:
+                # Final chunk carries the authoritative complete response — don't accumulate
+                if chunk.content:
+                    full_text = chunk.content
+            elif is_text_chunk:
+                full_text += chunk.content
+
+            # Determine what to display
+            # If it's a status update (tool execution), append it temporarily or ignore?
+            # For Telegram/Slack, we usually want to see "Thinking..." or "Running tool X..."
+            # But we don't want to lose the generated text.
+
+            display_text = full_text
+            if not is_text_chunk and chunk.content:
+                # It's a status update (e.g. "Running tool: Search...")
+                # We can append it to the text
+                separator = "\n\n" if full_text else ""
+                display_text = f"{full_text}{separator}*{chunk.content}*"
+
+            # Skip if empty (Telegram rejects empty messages)
+            if not display_text.strip():
+                continue
+
+            # Send full accumulated text (plus current status) to adapter
+            # Create a new chunk object because adapter might expect one
+            display_chunk = StreamChunk(
+                content=display_text, is_final=chunk.is_final, metadata=chunk.metadata
+            )
+
             message_id = await adapter.send_streaming_chunk(
-                destination_id, chunk, message_id,
+                destination_id,
+                display_chunk,
+                message_id,
             )
 
     async def _process_non_streaming(
@@ -233,6 +286,9 @@ class MessageRouter:
         session_id: str | None,
     ) -> None:
         """Process a message with non-streaming response."""
+        if not self._processor:
+            return
+
         response = await self._processor.process(
             query=message.content,
             session_id=session_id,
@@ -289,7 +345,9 @@ class MessageRouter:
         session_mgr = None
         if self._session_mapper:
             session_id = self._session_mapper.get_session_id(
-                user, channel_id=channel_id, create_if_missing=True,
+                user,
+                channel_id=channel_id,
+                create_if_missing=True,
             )
         if session_id:
             session_mgr = self._session_store.get_manager(session_id)
@@ -307,9 +365,7 @@ class MessageRouter:
         # If /load was used and session was loaded, sync chain
         if command == "/load" and args and session_id and self._session_mapper:
             self._session_mapper._sync_chain(
-                self._session_mapper._to_channel_identifier(
-                    user.platform.value, channel_id
-                ),
+                self._session_mapper._to_channel_identifier(user.platform.value, channel_id),
                 session_id,
             )
 
@@ -321,7 +377,9 @@ class MessageRouter:
 
         if self._session_mapper:
             self._session_mapper.set_session_id(
-                user, new_session_id, channel_id=channel_id,
+                user,
+                new_session_id,
+                channel_id=channel_id,
             )
 
         # Create a fresh SessionManager for the new session
@@ -345,9 +403,7 @@ class MessageRouter:
             session_manager=session_mgr,
             model=model,
             provider=provider,
-            tool_registry=(
-                self._processor._tool_registry if self._processor else None
-            ),
+            tool_registry=(self._processor._tool_registry if self._processor else None),
             agent_config=None,
             on_clear=session_mgr.clear_session if session_mgr else None,
         )

@@ -1,20 +1,21 @@
 """Agent execution loop for iterative tool use."""
 
 import asyncio
+import json
 import logging
-import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
+from inkarms.agent.client import AIClient
+from inkarms.agent.definitions import ToolDefinitionBuilder
+from inkarms.agent.execution import ToolExecutor
 from inkarms.agent.parser import ToolCallParser
-from inkarms.audit.logger import get_audit_logger
-from inkarms.models.agent import AgentConfig, AgentEvent, ApprovalMode, EventType
+from inkarms.models.agent import AgentConfig, AgentEvent, EventType
 from inkarms.models.tools import ToolCall, ToolResult
 from inkarms.providers.manager import ProviderManager
 from inkarms.tools.base import Tool
-from inkarms.tools.metrics import get_metrics_tracker
 from inkarms.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -55,57 +56,28 @@ class AgentLoop:
         event_callback: Callable[[AgentEvent], None] | None = None,
         stream_callback: Callable[[str], None] | None = None,
     ):
-        """Initialize agent loop.
-
-        Args:
-            provider_manager: ProviderManager for AI completions
-            tool_registry: ToolRegistry with available tools
-            config: AgentConfig for execution settings
-            approval_callback: Optional callback for manual approval
-                               Takes (ToolCall, Tool) and returns bool (approved)
-            event_callback: Optional callback for streaming events
-                            Takes (AgentEvent) for real-time updates
-            stream_callback: Optional callback for streaming text tokens
-                             Takes (str) for each text chunk as it arrives
-        """
-        self.provider_manager = provider_manager
-        self.tool_registry = tool_registry
+        """Initialize agent loop."""
         self.config = config or AgentConfig()
-        self.approval_callback = approval_callback
         self.event_callback = event_callback
-        self.stream_callback = stream_callback
+        self.approval_callback = approval_callback
+
+        # Initialize sub-components
+        self.ai_client = AIClient(provider_manager, stream_callback)
+        self.tool_def_builder = ToolDefinitionBuilder(tool_registry, self.config)
+        self.tool_executor = ToolExecutor(
+            tool_registry=tool_registry,
+            config=self.config,
+            event_callback=event_callback,
+            approval_callback=approval_callback,
+        )
 
     def _emit_event(self, event: AgentEvent) -> None:
-        """Emit an event if callback is configured.
-
-        Args:
-            event: AgentEvent to emit
-        """
+        """Emit an event if callback is configured."""
         if self.event_callback:
             try:
                 self.event_callback(event)
             except Exception as e:
                 logger.warning(f"Event callback error: {e}")
-
-    def _emit_tool_event(
-        self,
-        event_type: EventType,
-        tool_name: str,
-        tool_call_id: str,
-        message: str,
-        iteration: int,
-        data: dict[str, Any] | None = None,
-    ) -> None:
-        """Emit a tool-related event."""
-        self._emit_event(AgentEvent(
-            event_type=event_type,
-            iteration=iteration,
-            tool_name=tool_name,
-            tool_call_id=tool_call_id,
-            message=message,
-            data=data,
-            timestamp=datetime.now().isoformat(),
-        ))
 
     def _emit_loop_event(
         self,
@@ -115,13 +87,15 @@ class AgentLoop:
         data: dict[str, Any] | None = None,
     ) -> None:
         """Emit a loop-level event."""
-        self._emit_event(AgentEvent(
-            event_type=event_type,
-            iteration=iteration,
-            message=message,
-            data=data,
-            timestamp=datetime.now().isoformat(),
-        ))
+        self._emit_event(
+            AgentEvent(
+                event_type=event_type,
+                iteration=iteration,
+                message=message,
+                data=data,
+                timestamp=datetime.now().isoformat(),
+            )
+        )
 
     def _build_result(
         self,
@@ -150,15 +124,7 @@ class AgentLoop:
         messages: list[dict[str, Any]],
         model: str | None = None,
     ) -> AgentResult:
-        """Run agent loop with tool use.
-
-        Args:
-            messages: Conversation messages (OpenAI format)
-            model: Optional model override
-
-        Returns:
-            AgentResult with final response and execution details
-        """
+        """Run agent loop with tool use."""
         logger.info("Starting agent loop")
 
         iterations = 0
@@ -170,7 +136,7 @@ class AgentLoop:
             while iterations < self.config.max_iterations:
                 iterations += 1
                 result = await self._run_iteration(
-                    iterations, conversation, all_tool_calls, all_tool_results, model,
+                    iterations, conversation, all_tool_calls, all_tool_results, model
                 )
                 if result is not None:
                     return result
@@ -180,8 +146,10 @@ class AgentLoop:
                 f"Agent stopped: max iterations ({self.config.max_iterations}) reached",
             )
             return self._build_result(
-                success=False, iterations=iterations,
-                all_tool_calls=all_tool_calls, all_tool_results=all_tool_results,
+                success=False,
+                iterations=iterations,
+                all_tool_calls=all_tool_calls,
+                all_tool_results=all_tool_results,
                 error=f"Maximum iterations ({self.config.max_iterations}) reached",
                 stopped_reason="max_iterations",
             )
@@ -189,9 +157,12 @@ class AgentLoop:
         except Exception as e:
             logger.debug(f"Agent loop error: {e}")
             return self._build_result(
-                success=False, iterations=iterations,
-                all_tool_calls=all_tool_calls, all_tool_results=all_tool_results,
-                error=str(e), stopped_reason="error",
+                success=False,
+                iterations=iterations,
+                all_tool_calls=all_tool_calls,
+                all_tool_results=all_tool_results,
+                error=str(e),
+                stopped_reason="error",
             )
 
     async def _run_iteration(
@@ -202,73 +173,94 @@ class AgentLoop:
         all_tool_results: list[ToolResult],
         model: str | None,
     ) -> AgentResult | None:
-        """Run a single agent iteration.
-
-        Returns AgentResult if the loop should stop, None to continue.
-        """
+        """Run a single agent iteration."""
         iteration_idx = iterations - 1
         logger.info(f"Agent iteration {iterations}/{self.config.max_iterations}")
 
         self._emit_loop_event(
-            EventType.ITERATION_START, iteration_idx,
+            EventType.ITERATION_START,
+            iteration_idx,
             f"Starting iteration {iterations}/{self.config.max_iterations}",
         )
 
         # Call AI with tools
-        tool_definitions = self._get_tool_definitions()
+        tool_definitions = self.tool_def_builder.build()
         try:
             response = await asyncio.wait_for(
-                self._call_ai(conversation, tool_definitions, model),
+                self.ai_client.call(conversation, tool_definitions, model),
                 timeout=self.config.timeout_per_iteration,
             )
         except TimeoutError:
             logger.error(f"Iteration {iterations} timed out")
             return self._build_result(
-                success=False, iterations=iterations,
-                all_tool_calls=all_tool_calls, all_tool_results=all_tool_results,
-                error="Iteration timeout", stopped_reason="timeout",
+                success=False,
+                iterations=iterations,
+                all_tool_calls=all_tool_calls,
+                all_tool_results=all_tool_results,
+                error="Iteration timeout",
+                stopped_reason="timeout",
             )
 
         # Add assistant response to conversation
         conversation.append({"role": "assistant", "content": response.get("content")})
 
-        self._emit_loop_event(
-            EventType.AI_RESPONSE, iteration_idx, "AI response received",
-        )
+        self._emit_loop_event(EventType.AI_RESPONSE, iteration_idx, "AI response received")
 
         # Check if response contains tool calls
         if not ToolCallParser.has_tool_calls(response):
             final_text = ToolCallParser.extract_text_content(response)
             logger.info(f"Agent completed after {iterations} iterations")
             self._emit_loop_event(
-                EventType.AGENT_COMPLETE, iteration_idx,
+                EventType.AGENT_COMPLETE,
+                iteration_idx,
                 f"Agent completed after {iterations} iterations",
                 data={"final_response": final_text},
             )
             return self._build_result(
-                success=True, final_response=final_text, iterations=iterations,
-                all_tool_calls=all_tool_calls, all_tool_results=all_tool_results,
+                success=True,
+                final_response=final_text,
+                iterations=iterations,
+                all_tool_calls=all_tool_calls,
+                all_tool_results=all_tool_results,
             )
 
         # Parse tool calls
         tool_calls = ToolCallParser.parse_response(response)
         if not tool_calls:
             final_text = ToolCallParser.extract_text_content(response)
-            logger.warning("Response indicated tool use but none found")
+
+            # If we had tool calls indicated but failed to parse them, log it
+            if ToolCallParser.has_tool_calls(response):
+                logger.error(f"Response indicated tool use but parsing failed: {response}")
+
+            # If there's no text AND no tool calls (and parsing failed or wasn't attempted)
+            # This is an edge case (empty response)
+            if not final_text:
+                final_text = "(No content)"
+
+            logger.info("Agent completed iteration without actionable tool calls")
+            self._emit_loop_event(
+                EventType.AGENT_COMPLETE,
+                iteration_idx,
+                "Agent completed (no tools to run)",
+                data={"final_response": final_text},
+            )
             return self._build_result(
-                success=True, final_response=final_text, iterations=iterations,
-                all_tool_calls=all_tool_calls, all_tool_results=all_tool_results,
+                success=True,
+                final_response=final_text,
+                iterations=iterations,
+                all_tool_calls=all_tool_calls,
+                all_tool_results=all_tool_results,
             )
 
         logger.info(f"AI requested {len(tool_calls)} tool calls")
 
         # Replace the assistant message with OpenAI tool_calls format
-        # so LiteLLM can pass it correctly on subsequent iterations
         text_content = ToolCallParser.extract_text_content(response)
         conversation[-1] = self._build_tool_call_message(text_content, tool_calls)
 
         # Execute tool calls and track results
-        tool_results = await self._execute_tool_calls(tool_calls, iteration_idx)
+        tool_results = await self.tool_executor.execute_batch(tool_calls, iteration_idx)
         all_tool_calls.extend(tool_calls)
         all_tool_results.extend(tool_results)
 
@@ -276,7 +268,8 @@ class AgentLoop:
         self._add_tool_results_to_conversation(conversation, tool_results)
 
         self._emit_loop_event(
-            EventType.ITERATION_END, iteration_idx,
+            EventType.ITERATION_END,
+            iteration_idx,
             f"Iteration {iterations} completed",
             data={
                 "tools_executed": len(tool_calls),
@@ -286,360 +279,9 @@ class AgentLoop:
 
         return None  # Continue looping
 
-    def _get_tool_definitions(self) -> list[dict[str, Any]]:
-        """Get tool definitions to send to AI.
-
-        Returns:
-            List of tool definitions in Anthropic format
-        """
-        # If tools are disabled, return empty list
-        if not self.config.enable_tools or self.config.approval_mode == ApprovalMode.DISABLED:
-            return []
-
-        # Get all tools
-        all_tools = self.tool_registry.list_tools()
-
-        # Filter based on allowed/blocked lists
-        filtered_tools = []
-        for tool in all_tools:
-            allowed, _ = self.config.is_tool_allowed(tool.name, tool.is_dangerous)
-
-            # For manual approval mode, include dangerous tools in definitions
-            # but we'll check approval at execution time
-            if allowed or (
-                self.config.approval_mode == ApprovalMode.MANUAL and tool.is_dangerous
-            ):
-                filtered_tools.append(tool)
-
-        # Return tool definitions in OpenAI function calling format
-        # (LiteLLM expects this and translates per-provider)
-        definitions = []
-        for tool in filtered_tools:
-            raw = tool.get_tool_definition()
-            definitions.append({
-                "type": "function",
-                "function": {
-                    "name": raw["name"],
-                    "description": raw.get("description", ""),
-                    "parameters": raw.get("input_schema", {}),
-                },
-            })
-        return definitions
-
-    async def _call_ai(
-        self,
-        messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]],
-        model: str | None,
-    ) -> dict[str, Any]:
-        """Call AI provider with tools.
-
-        Args:
-            messages: Conversation messages
-            tools: Tool definitions
-            model: Optional model override
-
-        Returns:
-            AI response
-        """
-        # Call LiteLLM directly with raw dict messages to preserve
-        # OpenAI tool fields (tool_calls, tool_call_id) that the Message
-        # class would strip. Use provider manager for model resolution
-        # and response parsing (cost tracking).
-        from litellm import acompletion
-
-        resolved_model = self.provider_manager.resolve_model(model)
-        use_streaming = self.stream_callback is not None
-
-        request_kwargs: dict[str, Any] = {
-            "model": resolved_model,
-            "messages": messages,
-            "temperature": 0.7,
-            "stream": use_streaming,
-        }
-        if tools:
-            request_kwargs["tools"] = tools
-
-        response = await acompletion(**request_kwargs)
-
-        if not use_streaming:
-            parsed = self.provider_manager.parse_response(response, resolved_model)
-            return parsed.model_dump()
-
-        return await self._handle_streaming_response(
-            response, messages, resolved_model,
-        )
-
-    async def _handle_streaming_response(
-        self,
-        response: Any,
-        messages: list[dict[str, Any]],
-        resolved_model: str,
-    ) -> dict[str, Any]:
-        """Consume a streaming response, emitting text chunks via callback.
-
-        Collects all chunks then reconstructs the full response for parsing.
-        """
-        from litellm import stream_chunk_builder
-
-        chunks: list[Any] = []
-        has_tool_calls = False
-        async for chunk in response:
-            chunks.append(chunk)
-            if chunk.choices:
-                delta = chunk.choices[0].delta
-                if delta.content and not has_tool_calls:
-                    self.stream_callback(delta.content)
-                if hasattr(delta, "tool_calls") and delta.tool_calls:
-                    has_tool_calls = True
-
-        full_response = stream_chunk_builder(chunks, messages=messages)
-        parsed = self.provider_manager.parse_response(full_response, resolved_model)
-        return parsed.model_dump()
-
-    async def _execute_tool_calls(
-        self, tool_calls: list[ToolCall], iteration: int,
-    ) -> list[ToolResult]:
-        """Execute tool calls in parallel.
-
-        All tool calls are executed concurrently using asyncio.gather()
-        for maximum performance. Each tool execution is independent.
-
-        Args:
-            tool_calls: List of tool calls to execute
-            iteration: Current loop iteration (0-indexed)
-
-        Returns:
-            List of tool results (in same order as tool_calls)
-        """
-        if not tool_calls:
-            return []
-
-        # Execute all tools concurrently
-        results = await asyncio.gather(
-            *[
-                self._execute_single_tool(tool_call, iteration)
-                for tool_call in tool_calls
-            ],
-            return_exceptions=False,  # Let exceptions propagate as ToolResults
-        )
-
-        return list(results)
-
-    async def _execute_single_tool(
-        self, tool_call: ToolCall, iteration: int,
-    ) -> ToolResult:
-        """Execute a single tool call.
-
-        Args:
-            tool_call: Tool call to execute
-            iteration: Current loop iteration (0-indexed)
-
-        Returns:
-            Tool result
-        """
-        # Get tool from registry
-        tool = self.tool_registry.get(tool_call.name)
-
-        if not tool:
-            logger.warning(f"Tool not found: {tool_call.name}")
-            self._emit_tool_event(
-                EventType.TOOL_ERROR, tool_call.name, tool_call.id,
-                f"Tool '{tool_call.name}' not found", iteration,
-            )
-            return ToolResult(
-                tool_call_id=tool_call.id,
-                output="",
-                error=f"Tool '{tool_call.name}' not found",
-                is_error=True,
-            )
-
-        # Check if tool is allowed to execute
-        denial = self._check_tool_access(tool_call, tool, iteration)
-        if denial:
-            return denial
-
-        # Emit tool start event
-        self._emit_tool_event(
-            EventType.TOOL_START, tool.name, tool_call.id,
-            f"Executing tool: {tool.name}", iteration,
-            data={"tool_input": tool_call.input},
-        )
-
-        # Audit: log tool start
-        audit = get_audit_logger()
-        audit.log_tool_start(
-            tool_name=tool.name,
-            tool_call_id=tool_call.id,
-            parameters=tool_call.input,
-            is_dangerous=tool.is_dangerous,
-        )
-
-        # Execute tool with metrics
-        return await self._run_tool(tool, tool_call, iteration)
-
-    def _check_tool_access(
-        self, tool_call: ToolCall, tool: Tool, iteration: int,
-    ) -> ToolResult | None:
-        """Check if tool is allowed to execute.
-
-        Returns error ToolResult if denied, None if allowed.
-        """
-        allowed, reason = self.config.is_tool_allowed(tool.name, tool.is_dangerous)
-
-        # Manual approval mode: dangerous tools need explicit approval
-        if not allowed and self.config.approval_mode == ApprovalMode.MANUAL and tool.is_dangerous:
-            return self._handle_manual_approval(tool_call, tool, reason, iteration)
-
-        if not allowed:
-            logger.warning(f"Tool not allowed: {tool.name} - {reason}")
-            self._emit_tool_event(
-                EventType.TOOL_ERROR, tool.name, tool_call.id,
-                f"Tool not allowed: {reason}", iteration,
-            )
-            return ToolResult(
-                tool_call_id=tool_call.id,
-                output="",
-                error=f"Tool not allowed: {reason}",
-                is_error=True,
-            )
-
-        return None
-
-    def _handle_manual_approval(
-        self, tool_call: ToolCall, tool: Tool, reason: str, iteration: int,
-    ) -> ToolResult | None:
-        """Handle manual approval flow for dangerous tools.
-
-        Returns error ToolResult if denied, None if approved.
-        """
-        self._emit_tool_event(
-            EventType.TOOL_APPROVAL_NEEDED, tool.name, tool_call.id,
-            f"Approval required for tool: {tool.name}", iteration,
-            data={"tool_input": tool_call.input},
-        )
-
-        if not self.approval_callback:
-            logger.warning(f"Manual approval required but no callback: {tool.name}")
-            return ToolResult(
-                tool_call_id=tool_call.id,
-                output="",
-                error=f"Manual approval required: {reason}",
-                is_error=True,
-            )
-
-        approved = self.approval_callback(tool_call, tool)
-        if approved:
-            self._emit_tool_event(
-                EventType.TOOL_APPROVED, tool.name, tool_call.id,
-                f"Tool execution approved: {tool.name}", iteration,
-            )
-            return None
-
-        logger.info(f"Tool execution denied by user: {tool.name}")
-        self._emit_tool_event(
-            EventType.TOOL_DENIED, tool.name, tool_call.id,
-            f"Tool execution denied: {tool.name}", iteration,
-        )
-        get_audit_logger().log_tool_denied(
-            tool_name=tool.name,
-            tool_call_id=tool_call.id,
-            reason="denied by user",
-        )
-        return ToolResult(
-            tool_call_id=tool_call.id,
-            output="",
-            error="Tool execution denied by user",
-            is_error=True,
-        )
-
-    async def _run_tool(
-        self, tool: Tool, tool_call: ToolCall, iteration: int,
-    ) -> ToolResult:
-        """Execute tool, record metrics, emit events, and audit log."""
-        logger.info(f"Executing tool: {tool.name}")
-        start_time = time.time()
-        audit = get_audit_logger()
-
-        try:
-            result = await tool.execute(tool_call_id=tool_call.id, **tool_call.input)
-            execution_time = time.time() - start_time
-
-            # Record metrics
-            get_metrics_tracker().record_execution(
-                tool_name=tool.name,
-                success=not result.is_error,
-                execution_time=execution_time,
-                error_message=result.error if result.is_error else None,
-            )
-
-            # Emit completion or error event and audit
-            if result.is_error:
-                self._emit_tool_event(
-                    EventType.TOOL_ERROR, tool.name, tool_call.id,
-                    f"Tool failed: {tool.name}", iteration,
-                    data={"error": result.error, "execution_time": execution_time},
-                )
-                audit.log_tool_error(
-                    tool_name=tool.name,
-                    tool_call_id=tool_call.id,
-                    execution_time=execution_time,
-                    error=result.error or "unknown error",
-                )
-            else:
-                self._emit_tool_event(
-                    EventType.TOOL_COMPLETE, tool.name, tool_call.id,
-                    f"Tool completed: {tool.name}", iteration,
-                    data={
-                        "output_preview": result.output[:100] if result.output else "",
-                        "execution_time": execution_time,
-                    },
-                )
-                audit.log_tool_complete(
-                    tool_name=tool.name,
-                    tool_call_id=tool_call.id,
-                    execution_time=execution_time,
-                    output_preview=result.output[:200] if result.output else "",
-                )
-
-            return result
-        except Exception as e:
-            execution_time = time.time() - start_time
-            logger.debug(f"Tool execution failed: {tool.name}: {e}")
-
-            # Record metrics for exception
-            get_metrics_tracker().record_execution(
-                tool_name=tool.name,
-                success=False,
-                execution_time=execution_time,
-                error_message=str(e),
-            )
-
-            self._emit_tool_event(
-                EventType.TOOL_ERROR, tool.name, tool_call.id,
-                f"Tool exception: {tool.name}", iteration,
-                data={"exception": str(e), "execution_time": execution_time},
-            )
-            audit.log_tool_error(
-                tool_name=tool.name,
-                tool_call_id=tool_call.id,
-                execution_time=execution_time,
-                error=str(e),
-            )
-            return ToolResult(
-                tool_call_id=tool_call.id,
-                output="",
-                error=f"Tool execution failed: {e!s}",
-                is_error=True,
-            )
-
     @staticmethod
-    def _build_tool_call_message(
-        text_content: str, tool_calls: list[ToolCall]
-    ) -> dict[str, Any]:
+    def _build_tool_call_message(text_content: str, tool_calls: list[ToolCall]) -> dict[str, Any]:
         """Build an assistant message with tool_calls in OpenAI format."""
-        import json
-
         return {
             "role": "assistant",
             "content": text_content or None,
@@ -650,9 +292,7 @@ class AgentLoop:
                     "function": {
                         "name": tc.name,
                         "arguments": (
-                            json.dumps(tc.input)
-                            if isinstance(tc.input, dict)
-                            else str(tc.input)
+                            json.dumps(tc.input) if isinstance(tc.input, dict) else str(tc.input)
                         ),
                     },
                 }
@@ -662,10 +302,7 @@ class AgentLoop:
 
     @staticmethod
     def _truncate_output(output: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:
-        """Truncate tool output to prevent context window exhaustion.
-
-        Keeps head and tail of output (most useful info tends to be there).
-        """
+        """Truncate tool output."""
         if len(output) <= max_chars:
             return output
         half = max_chars // 2
@@ -679,12 +316,7 @@ class AgentLoop:
     def _add_tool_results_to_conversation(
         conversation: list[dict[str, Any]], tool_results: list[ToolResult]
     ) -> None:
-        """Add tool results to conversation in OpenAI format.
-
-        Args:
-            conversation: Conversation messages (modified in place)
-            tool_results: Tool results to add
-        """
+        """Add tool results to conversation in OpenAI format."""
         for result in tool_results:
             conversation.append(
                 {

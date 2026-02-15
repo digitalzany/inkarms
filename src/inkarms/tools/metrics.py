@@ -42,6 +42,8 @@ class ToolStats:
 class ToolMetricsTracker:
     """Track and analyze tool usage metrics."""
 
+    MAX_METRICS = 1000  # Keep only the most recent entries
+
     def __init__(self, metrics_file: Optional[Path] = None):
         """Initialize metrics tracker.
 
@@ -55,6 +57,7 @@ class ToolMetricsTracker:
 
         self.metrics_file = metrics_file
         self.metrics: list[ToolExecutionMetric] = []
+        self._pending_writes: list[ToolExecutionMetric] = []
         self._load_metrics()
 
     def _load_metrics(self) -> None:
@@ -69,6 +72,9 @@ class ToolMetricsTracker:
                     ToolExecutionMetric(**metric)
                     for metric in data.get("metrics", [])
                 ]
+                # Prune to max size on load
+                if len(self.metrics) > self.MAX_METRICS:
+                    self.metrics = self.metrics[-self.MAX_METRICS :]
         except Exception as e:
             # If loading fails, start fresh
             print(f"Warning: Could not load metrics: {e}")
@@ -84,7 +90,7 @@ class ToolMetricsTracker:
         }
 
         with open(self.metrics_file, "w") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f)
 
     def record_execution(
         self,
@@ -110,7 +116,16 @@ class ToolMetricsTracker:
         )
 
         self.metrics.append(metric)
-        self._save_metrics()
+
+        # Prune old entries to prevent unbounded growth
+        if len(self.metrics) > self.MAX_METRICS:
+            self.metrics = self.metrics[-self.MAX_METRICS :]
+
+        # Batch writes: save every 10 executions instead of every single one
+        self._pending_writes.append(metric)
+        if len(self._pending_writes) >= 10:
+            self._save_metrics()
+            self._pending_writes.clear()
 
     def get_tool_stats(self, tool_name: str) -> Optional[ToolStats]:
         """Get statistics for a specific tool.
@@ -241,6 +256,7 @@ class ToolMetricsTracker:
     def clear_metrics(self) -> None:
         """Clear all metrics."""
         self.metrics = []
+        self._pending_writes.clear()
         self._save_metrics()
 
 

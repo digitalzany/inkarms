@@ -126,7 +126,7 @@ class TestMessageProcessor:
 
     def test_build_system_prompt_with_personality(self, processor):
         """Test building system prompt with personality."""
-        prompt = processor._build_system_prompt([])
+        prompt = processor._context_builder.build_system_prompt([])
 
         assert "Test personality" in prompt
 
@@ -136,7 +136,7 @@ class TestMessageProcessor:
         skill = Mock(spec=Skill)
         skill.get_system_prompt_injection = Mock(return_value="Skill instructions here")
 
-        prompt = processor._build_system_prompt([skill])
+        prompt = processor._context_builder.build_system_prompt([skill])
 
         assert "Test personality" in prompt
         assert "Skill instructions" in prompt
@@ -155,16 +155,17 @@ class TestMessageProcessor:
             mock_get_config.return_value = mock_config
 
             processor = MessageProcessor(skill_manager=mock_skill_manager)
-            prompt = processor._build_system_prompt([])
+            prompt = processor._context_builder.build_system_prompt([])
 
             assert prompt == ""
 
     def test_build_messages_basic(self, processor):
         """Test building messages without session."""
-        messages = processor._build_messages(
+        messages = processor._context_builder.build_messages(
             query="Hello, bot!",
             skills=[],
             session_id=None,
+            session_manager=processor._session_manager,
         )
 
         # Should have system and user messages
@@ -179,10 +180,11 @@ class TestMessageProcessor:
         processor._session_manager.set_system_prompt = Mock()
         processor._session_manager.add_user_message = Mock()
 
-        messages = processor._build_messages(
+        messages = processor._context_builder.build_messages(
             query="Test query",
             skills=[],
             session_id="test_session_123",
+            session_manager=processor._session_manager,
         )
 
         # Session manager should be called
@@ -198,10 +200,11 @@ class TestMessageProcessor:
         ]
         processor._session_manager.get_messages = Mock(return_value=prior_turns)
 
-        messages = processor._build_messages(
+        messages = processor._context_builder.build_messages(
             query="Follow-up question",
             skills=[],
             session_id="test_session_123",
+            session_manager=processor._session_manager,
         )
 
         # system + 2 prior turns + current user query
@@ -218,10 +221,11 @@ class TestMessageProcessor:
         """Test that no history is loaded when session_id is None (CLI path)."""
         processor._session_manager.get_messages = Mock(return_value=[])
 
-        messages = processor._build_messages(
+        messages = processor._context_builder.build_messages(
             query="Hello",
             skills=[],
             session_id=None,
+            session_manager=processor._session_manager,
         )
 
         # Should NOT call get_messages without a session_id

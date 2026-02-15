@@ -147,12 +147,13 @@ def cmd_model(ctx: CommandContext, arg: str) -> CommandResult:
     """Show or change model. Lists available models when called without args."""
     if arg and ctx.session_manager:
         ctx.session_manager.set_model(arg)
+
         return CommandResult(message=f"Model changed to: {arg}")
 
     # Show current model and available models
     parts = [f"Current model: {ctx.model}"]
 
-    available = _get_available_models()
+    available = _get_available_models(ctx)
     if available:
         parts.append(f"Available: {', '.join(available)}")
         parts.append("Usage: /model <name>")
@@ -160,30 +161,38 @@ def cmd_model(ctx: CommandContext, arg: str) -> CommandResult:
     return CommandResult(message=" | ".join(parts))
 
 
-def _get_available_models() -> list[str]:
+def _get_available_models(ctx: CommandContext = None) -> list[str]:
     """Collect available model names from config."""
     try:
         from inkarms.config import get_config
+        from inkarms.config.providers import get_model_choices
 
-        config = get_config()
+        # config = get_config()
         models: list[str] = []
 
         # Default model
-        if config.providers.default:
-            models.append(config.providers.default)
+        # if config.providers.default:
+        #     models.append(config.providers.default)
 
         # Fallback chain
-        for fb in config.providers.fallback:
-            if fb not in models:
-                models.append(fb)
+        # for fb in config.providers.fallback:
+        #     if fb not in models:
+        #         models.append(fb)
 
         # Aliases (show alias → target)
-        for alias, target in config.providers.aliases.items():
-            label = f"{alias} ({target})" if target not in models else alias
-            if label not in models:
-                models.append(label)
+        # for alias, target in config.providers.aliases.items():
+        #     label = f"{alias} ({target})" if target not in models else alias
+        #     if label not in models:
+        #         models.append(label)
+
+        if ctx:
+            provider = ctx.provider.split("/")[0] if "/" in ctx.provider else ctx.provider
+            provider_models = get_model_choices(provider)
+            for model in provider_models:
+                models.append(model[0])
 
         return models
+
     except Exception:
         return []
 

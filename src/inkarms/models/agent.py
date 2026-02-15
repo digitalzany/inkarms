@@ -95,45 +95,32 @@ class EventType(str, Enum):
     TOOL_APPROVED = "tool_approved"  # Tool approved by user
     TOOL_DENIED = "tool_denied"  # Tool denied by user
     AI_RESPONSE = "ai_response"  # AI response received
+    STREAM_CHUNK = "stream_chunk"  # AI streaming text chunk
     AGENT_COMPLETE = "agent_complete"  # Agent loop completes
 
 
 class AgentEvent(BaseModel):
     """Event emitted during agent execution for streaming updates."""
 
-    event_type: EventType = Field(
-        description="Type of event"
-    )
+    event_type: EventType = Field(description="Type of event")
 
-    iteration: int = Field(
-        description="Current iteration number (0-based)"
-    )
+    iteration: int = Field(description="Current iteration number (0-based)")
 
-    tool_name: Optional[str] = Field(
-        default=None,
-        description="Tool name (for tool events)"
-    )
+    tool_name: Optional[str] = Field(default=None, description="Tool name (for tool events)")
 
-    tool_call_id: Optional[str] = Field(
-        default=None,
-        description="Tool call ID (for tool events)"
-    )
+    tool_call_id: Optional[str] = Field(default=None, description="Tool call ID (for tool events)")
 
     message: Optional[str] = Field(
-        default=None,
-        description="Human-readable message describing the event"
+        default=None, description="Human-readable message describing the event"
     )
 
     data: Optional[dict[str, Any]] = Field(
-        default=None,
-        description="Additional event data (tool parameters, results, etc.)"
+        default=None, description="Additional event data (tool parameters, results, etc.)"
     )
 
-    timestamp: Optional[str] = Field(
-        default=None,
-        description="ISO format timestamp"
-    )
+    timestamp: Optional[str] = Field(default=None, description="ISO format timestamp")
 
     class Config:
         """Pydantic config."""
+
         use_enum_values = True

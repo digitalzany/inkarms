@@ -24,6 +24,9 @@ from inkarms.ui.backends.rich_backend.key_binding import bind_keys
 from inkarms.ui.protocol import UIView
 
 if TYPE_CHECKING:
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.widgets import TextArea
+
     from inkarms.ui.backends.rich_backend.backend import RichBackend
 
 
@@ -39,8 +42,9 @@ class ChatView:
         self.app: Application | None = None
         self.scroll_offset = 0
         self.total_lines = 0
-        self.input_area = None
-        self._key_bindings = None
+        self.input_area: TextArea = self._build_input_area()
+        self._key_bindings: KeyBindings | None = None
+        self.chat_buffer: Buffer = Buffer(read_only=True)
         # Agent/tool state
         self._tool_blocks: list[str] = []
         self._current_tool_status: str = ""
@@ -114,7 +118,6 @@ class ChatView:
             self.app.invalidate()
 
     def run(self) -> UIView | None:
-        self._build_input_area()
         self.chat_buffer = Buffer(read_only=True)
         self._update_chat_buffer()
         layout = self._build_layout()
@@ -129,7 +132,7 @@ class ChatView:
         self.app.run()
         return self.exit_to
 
-    def _build_input_area(self) -> None:
+    def _build_input_area(self) -> TextArea:
         """Create the input TextArea with command completion."""
         from prompt_toolkit.widgets import TextArea
 
@@ -137,10 +140,12 @@ class ChatView:
 
         def _on_accept_handler(buff: Buffer) -> bool:
             self._on_accept(buff)
-            self.input_area.text = ""
+            # Ensure input_area is not None before accessing text
+            if self.input_area:
+                self.input_area.text = ""
             return True
 
-        self.input_area = TextArea(
+        return TextArea(
             height=1,
             multiline=False,
             wrap_lines=False,
@@ -154,53 +159,64 @@ class ChatView:
         """Update chat buffer with markdown-rendered content as ANSI text."""
         from prompt_toolkit.document import Document
 
-        lines = []
-        messages = self.backend.messages
-
         try:
-            width = get_app().output.get_size().columns - 4
-        except Exception:
-            width = 100
+            lines = []
+            messages = self.backend.messages
 
-        if not messages and not self.streaming:
-            lines.append("  Start typing to chat...")
-            lines.append("  Type /help for commands")
-        else:
-            for msg in messages:
-                ts = (
-                    f"[{msg.timestamp}] "
-                    if msg.timestamp and self.backend.config.show_timestamps
-                    else ""
-                )
-                if msg.role == "user":
-                    lines.append(
-                        render_styled_text(f"{ts}You: {msg.content}", THEME_STYLES["user"])
+            try:
+                width = get_app().output.get_size().columns - 4
+            except Exception:
+                width = 100
+
+            if not messages and not self.streaming:
+                lines.append("  Start typing to chat...")
+                lines.append("  Type /help for commands")
+            else:
+                for msg in messages:
+                    ts = (
+                        f"[{msg.timestamp}] "
+                        if msg.timestamp and self.backend.config.show_timestamps
+                        else ""
                     )
-                    lines.append("")
-                else:
-                    try:
-                        rendered = render_markdown_ansi(
-                            msg.content,
-                            width=width,
-                            style=THEME_STYLES.get("assistant-text", ""),
-                            wrap_in_panel=True,
-                            panel_title=f"{ts}Assistant",
-                            panel_border_style=THEME_STYLES["assistant"],
+                    if msg.role == "user":
+                        lines.append(
+                            render_styled_text(f"{ts}You: {msg.content}", THEME_STYLES["user"])
                         )
-                        lines.append(rendered)
-                    except Exception:
-                        lines.append(msg.content)
-                    lines.append("")
+                        lines.append("")
+                    else:
+                        try:
+                            rendered = render_markdown_ansi(
+                                msg.content,
+                                width=width,
+                                style=THEME_STYLES.get("assistant-text", ""),
+                                wrap_in_panel=True,
+                                panel_title=f"{ts}Assistant",
+                                panel_border_style=THEME_STYLES["assistant"],
+                            )
+                            lines.append(rendered)
+                        except Exception:
+                            lines.append(msg.content)
+                        lines.append("")
 
-        if self.streaming:
-            self._render_streaming_content(lines, width)
+            if self.streaming:
+                self._render_streaming_content(lines, width)
 
-        if self.pending_message:
-            lines.append("")
-            lines.append(f"  {self.pending_message}")
+            if self.pending_message:
+                lines.append("")
+                lines.append(f"  {self.pending_message}")
 
-        text = "\n".join(lines)
-        self.chat_buffer.set_document(Document(text, len(text)), bypass_readonly=True)
+            text = "\n".join(lines)
+            self.chat_buffer.set_document(Document(text, len(text)), bypass_readonly=True)
+        except Exception as e:
+            # Fallback to avoid empty screen on error
+            import traceback
+            import contextlib
+
+            traceback.print_exc()
+            with contextlib.suppress(Exception):
+                self.chat_buffer.set_document(
+                    Document(f"Error updating UI: {e}", 0), bypass_readonly=True
+                )
 
     def _render_streaming_content(self, lines: list[str], width: int) -> None:
         """Render streaming, tool, and approval content into lines."""
@@ -309,7 +325,6 @@ class ChatView:
         layout.focus(self.input_area)
         return layout
 
-
     def add_key_bindings(self) -> None:
         self._key_bindings = bind_keys(self, ["c-c,c-q,escape", "home", "end"])
 
@@ -383,8 +398,7 @@ class ChatView:
             self._approval_result = True
             self._approval_event.set()
 
-
-    def _on_accept(self, buff):
+    def _on_accept(self, buff: Buffer) -> None:
         """Handle input submission."""
         text = buff.text.strip()
         if not text or self.streaming:
@@ -470,14 +484,21 @@ class ChatView:
         """Handle agent loop events (tool start/complete/error)."""
         from inkarms.models.agent import EventType
 
+        # Ignore stream chunks in event loop as they are handled by on_chunk callback
+        # This prevents double-updating and flicker
+        if event.event_type == EventType.STREAM_CHUNK:
+            return
+
         if event.event_type == EventType.TOOL_START:
             self.streaming_content = ""  # Clear streamed text so tool UI shows
             self._current_tool_status = f"Running {event.tool_name}..."
         elif event.event_type == EventType.TOOL_COMPLETE:
             data = event.data or {}
             block = self._render_tool_block(
-                event.tool_name, "success",
-                data.get("execution_time", 0), data.get("output_preview", ""),
+                event.tool_name,
+                "success",
+                data.get("execution_time", 0),
+                data.get("output_preview", ""),
             )
             self._tool_blocks.append(block)
             self._current_tool_status = ""
@@ -485,14 +506,19 @@ class ChatView:
             data = event.data or {}
             error_msg = data.get("error") or data.get("exception") or "Unknown error"
             block = self._render_tool_block(
-                event.tool_name, "error",
-                data.get("execution_time", 0), error_msg,
+                event.tool_name,
+                "error",
+                data.get("execution_time", 0),
+                error_msg,
             )
             self._tool_blocks.append(block)
             self._current_tool_status = ""
         elif event.event_type == EventType.TOOL_DENIED:
             block = self._render_tool_block(
-                event.tool_name, "denied", 0, "Denied by user",
+                event.tool_name,
+                "denied",
+                0,
+                "Denied by user",
             )
             self._tool_blocks.append(block)
             self._current_tool_status = ""
@@ -505,7 +531,9 @@ class ChatView:
     def _handle_agent_approval(self, tool_call, tool):
         """Handle tool approval request (blocks until user responds)."""
         self._pending_approval_info = (
-            tool.name, str(tool_call.input)[:200], tool.is_dangerous,
+            tool.name,
+            str(tool_call.input)[:200],
+            tool.is_dangerous,
         )
         self._approval_event.clear()
         if self.app:
@@ -560,8 +588,7 @@ class ChatView:
                     )
                 elif usage.should_compact:
                     self.pending_message = (
-                        f"Context at {usage.usage_percent * 100:.0f}% - "
-                        f"compaction recommended"
+                        f"Context at {usage.usage_percent * 100:.0f}% - compaction recommended"
                     )
             except Exception:
                 pass

@@ -5,8 +5,12 @@ This module bridges platform adapters to the core InkArms components
 """
 
 import asyncio
+import contextlib
+import json
 import logging
 from collections.abc import AsyncIterator, Callable
+from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -15,12 +19,12 @@ from inkarms.audit import get_audit_logger
 from inkarms.config import get_config
 from inkarms.memory import get_session_manager
 from inkarms.models.platforms import PlatformType, StreamChunk
+from inkarms.platforms.context import ContextBuilder
 from inkarms.platforms.sessions import PlatformSessionStore
 from inkarms.providers import (
     AllProvidersFailedError,
     AuthenticationError,
     CompletionResponse,
-    Message,
     ProviderError,
     get_provider_manager,
 )
@@ -66,16 +70,7 @@ class MessageProcessor:
         tool_approval_callback: Callable | None = None,
         session_store: PlatformSessionStore | None = None,
     ):
-        """Initialize the message processor.
-
-        Args:
-            skill_manager: Optional skill manager (defaults to singleton)
-            event_callback: Optional callback for streaming events (tool execution, etc.)
-            tool_approval_callback: Optional callback for manual tool approval
-            session_store: Optional per-channel session store. When provided,
-                session_id is used to get a per-channel SessionManager.
-                Falls back to the global singleton when None.
-        """
+        """Initialize the message processor."""
         self._skill_manager = skill_manager or get_skill_manager()
         self._config = get_config()
         self._session_manager = get_session_manager(model=self._config.providers.default)
@@ -83,80 +78,19 @@ class MessageProcessor:
         self._event_callback = event_callback
         self._tool_approval_callback = tool_approval_callback
         self._session_store = session_store
+        self._context_builder = ContextBuilder(self._config)
 
         # Initialize tool registry with built-in tools
-        self._tool_registry: ToolRegistry | None = None
+        self._tool_registry: ToolRegistry = ToolRegistry()
         if self._config.agent.enable_tools:
-            self._tool_registry = ToolRegistry()
             sandbox = SandboxExecutor.from_config(self._config.security)
             register_builtin_tools(self._tool_registry, sandbox)
 
     def _resolve_session_manager(self, session_id: str | None):
-        """Get the appropriate SessionManager for this request.
-
-        When a session_store is configured and session_id is provided,
-        returns a per-channel SessionManager. Otherwise falls back to
-        the global singleton.
-        """
+        """Get the appropriate SessionManager for this request."""
         if self._session_store and session_id:
-            return self._session_store.get_manager(
-                session_id, model=self._config.providers.default
-            )
+            return self._session_store.get_manager(session_id, model=self._config.providers.default)
         return self._session_manager
-
-    def _build_system_prompt(self, skills: list[Skill]) -> str:
-        """Build system prompt with personality and skills."""
-        parts = []
-
-        if self._config.system_prompt.personality:
-            parts.append(self._config.system_prompt.personality)
-
-        if skills:
-            parts.append("# Active Skills\n")
-            for skill in skills:
-                parts.append(skill.get_system_prompt_injection())
-                parts.append("\n---\n")
-
-        return "\n\n".join(parts) if parts else ""
-
-    def _build_messages(
-        self,
-        query: str,
-        skills: list[Skill],
-        session_id: str | None = None,
-        session_mgr=None,
-    ) -> list[Message]:
-        """Build message list for completion."""
-        mgr = session_mgr or self._session_manager
-        messages: list[Message] = []
-
-        system_prompt = self._build_system_prompt(skills)
-        if system_prompt:
-            messages.append(Message.system(system_prompt))
-
-        # Load prior conversation history for platform sessions
-        if session_id and mgr:
-            try:
-                for prior_msg in mgr.get_messages(include_system=False):
-                    messages.append(Message(role=prior_msg["role"], content=prior_msg["content"]))
-            except Exception as e:
-                logger.error(f"Failed to load session history: {e}")
-
-        if session_id:
-            try:
-                if system_prompt:
-                    mgr.set_system_prompt(system_prompt)
-            except Exception as e:
-                logger.error(f"Failed to set system prompt: {e}")
-
-        messages.append(Message.user(query))
-        if mgr:
-            try:
-                mgr.add_user_message(query)
-            except Exception as e:
-                logger.error(f"Failed to add user message to session: {e}")
-
-        return messages
 
     def _make_error_response(self, error_msg: str) -> ProcessedResponse:
         """Create an error ProcessedResponse."""
@@ -193,7 +127,7 @@ class MessageProcessor:
 
     def _log_outgoing(
         self,
-        response_text: str,
+        response_text: str | list[dict[str, Any]],
         platform: PlatformType,
         platform_user_id: str | None,
         session_id: str | None,
@@ -201,18 +135,20 @@ class MessageProcessor:
         cost: float,
     ) -> None:
         """Log an outgoing platform response."""
+        content_str = self._content_to_str(response_text)
+
         if platform != PlatformType.CLI and platform_user_id:
             self._audit_logger.log_platform_message_sent(
                 platform=platform.value,
                 user_id=platform_user_id,
-                response=response_text,
+                response=content_str,
                 session_id=session_id,
                 tokens=tokens,
                 cost=cost,
             )
         else:
             self._audit_logger.log_query(
-                response_text,
+                content_str,
                 platform=platform.value,
                 session_id=session_id,
                 metadata={"type": "response"},
@@ -221,7 +157,7 @@ class MessageProcessor:
     def _track_response(
         self,
         session_id: str | None,
-        text: str,
+        text: str | list[dict[str, Any]],
         model: str,
         cost: float,
         session_mgr=None,
@@ -230,11 +166,26 @@ class MessageProcessor:
         mgr = session_mgr or self._session_manager
         if session_id:
             try:
-                mgr.add_assistant_message(text, model=model, cost=cost)
+                content_str = self._content_to_str(text)
+                mgr.add_assistant_message(content_str, model=model, cost=cost)
             except Exception as e:
                 logger.error(f"Failed to track response in session: {e}")
 
-    def _create_agent(self, manager) -> AgentLoop:
+    @staticmethod
+    def _content_to_str(content: str | list[dict[str, Any]]) -> str:
+        """Convert content (string or blocks) to string."""
+        if isinstance(content, str):
+            return content
+        try:
+            return json.dumps(content)
+        except Exception:
+            return str(content)
+
+    def _create_agent(
+        self,
+        manager,
+        stream_callback: Callable[[str], None] | None = None,
+    ) -> AgentLoop:
         """Create an AgentLoop with current config."""
         agent_config = AgentConfig(
             approval_mode=ApprovalMode(self._config.agent.approval_mode),
@@ -244,17 +195,23 @@ class MessageProcessor:
             allowed_tools=self._config.agent.allowed_tools,
             blocked_tools=self._config.agent.blocked_tools,
         )
+        # We need a proper tool registry here, handle None case
+        registry = self._tool_registry or ToolRegistry()
         return AgentLoop(
             provider_manager=manager,
-            tool_registry=self._tool_registry,
+            tool_registry=registry,
             config=agent_config,
             approval_callback=self._tool_approval_callback,
             event_callback=self._event_callback,
+            stream_callback=stream_callback,
         )
 
     @staticmethod
     def _event_to_stream_chunk(event: AgentEvent) -> StreamChunk | None:
         """Convert an agent event to a progress stream chunk."""
+        if event.event_type == EventType.STREAM_CHUNK:
+            return StreamChunk(content=event.message or "", is_final=False)
+
         formatters = {
             EventType.TOOL_START: lambda e: f"Running tool: {e.tool_name}...",
             EventType.TOOL_COMPLETE: lambda e: f"Tool completed: {e.tool_name}",
@@ -281,6 +238,7 @@ class MessageProcessor:
     ) -> AsyncIterator[StreamChunk]:
         """Run agent loop and yield progress chunks as events arrive."""
         mgr = session_mgr or self._session_manager
+        agent_task: asyncio.Task | None = None
         try:
             event_queue: asyncio.Queue[AgentEvent | None] = asyncio.Queue()
 
@@ -289,8 +247,20 @@ class MessageProcessor:
                 if self._event_callback:
                     self._event_callback(event)
 
-            agent = self._create_agent(manager)
+            def _stream_text(text: str) -> None:
+                """Callback for raw streaming text chunks."""
+                event = AgentEvent(
+                    event_type=EventType.STREAM_CHUNK,
+                    iteration=0,
+                    message=text,
+                    timestamp=datetime.now().isoformat(),
+                )
+                event_queue.put_nowait(event)
+
+            agent = self._create_agent(manager, stream_callback=_stream_text)
             agent.event_callback = _queue_event
+            agent.tool_executor.event_callback = _queue_event
+
             message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
 
             agent_task = asyncio.create_task(agent.run(message_dicts, model=model))
@@ -298,37 +268,50 @@ class MessageProcessor:
             while not agent_task.done():
                 try:
                     event = await asyncio.wait_for(event_queue.get(), timeout=0.5)
-                    chunk = self._event_to_stream_chunk(event)
-                    if chunk:
-                        yield chunk
+                    if event:
+                        chunk = self._event_to_stream_chunk(event)
+                        if chunk:
+                            yield chunk
                 except TimeoutError:
                     continue
 
             # Drain remaining events
             while not event_queue.empty():
                 event = event_queue.get_nowait()
-                chunk = self._event_to_stream_chunk(event)
-                if chunk:
-                    yield chunk
+                if event:
+                    chunk = self._event_to_stream_chunk(event)
+                    if chunk:
+                        yield chunk
 
             result = agent_task.result()
             yield StreamChunk(content=result.final_response, is_final=True)
 
             summary = manager.get_cost_summary()
             self._track_response(
-                session_id, result.final_response,
+                session_id,
+                result.final_response,
                 mgr.model or "unknown",
                 summary.total_cost if summary else 0.0,
                 session_mgr=mgr,
             )
             self._log_outgoing(
-                result.final_response, platform, platform_user_id, session_id,
+                result.final_response,
+                platform,
+                platform_user_id,
+                session_id,
                 self._session_total_tokens(session_mgr=mgr),
                 summary.total_cost if summary else 0.0,
             )
         except Exception as e:
             logger.error(f"Agent loop error: {e}", exc_info=True)
             yield StreamChunk(content=f"Error: Agent loop error: {e}", is_final=True)
+        finally:
+            # Always cancel the agent task to prevent orphaned background loops
+            # that keep making LLM calls and accumulating conversation data
+            if agent_task is not None and not agent_task.done():
+                agent_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await agent_task
 
     def _session_total_tokens(self, session_mgr=None) -> int:
         """Get total tokens from session metadata, or 0."""
@@ -349,29 +332,15 @@ class MessageProcessor:
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> ProcessedResponse:
-        """Process a message and return non-streaming response.
-
-        Args:
-            query: User query
-            session_id: Optional session ID for context tracking
-            platform: Platform the message came from
-            platform_user_id: Platform-specific user ID
-            platform_username: Platform username/display name
-            model: Model to use (None = default)
-            skill_names: Explicit skill names to load
-            auto_skills: Whether to auto-discover skills
-            temperature: Sampling temperature
-            max_tokens: Maximum tokens in response
-
-        Returns:
-            ProcessedResponse with completion result
-        """
+        """Process a message and return non-streaming response."""
         self._log_incoming(query, platform, platform_user_id, platform_username, session_id)
 
         smgr = self._resolve_session_manager(session_id)
         skills = await self._load_skills(query, skill_names, auto_skills)
-        messages = self._build_messages(query, skills, session_id, session_mgr=smgr)
-        smgr.set_model(model)
+        messages = self._context_builder.build_messages(
+            query, skills, session_id, session_manager=smgr
+        )
+        smgr.set_model(model or "default")
 
         try:
             manager = get_provider_manager()
@@ -388,13 +357,17 @@ class MessageProcessor:
                 summary = manager.get_cost_summary()
 
                 self._track_response(
-                    session_id, result.final_response,
+                    session_id,
+                    result.final_response,
                     smgr.model or "unknown",
                     summary.total_cost if summary else 0.0,
                     session_mgr=smgr,
                 )
                 self._log_outgoing(
-                    result.final_response, platform, platform_user_id, session_id,
+                    result.final_response,
+                    platform,
+                    platform_user_id,
+                    session_id,
                     self._session_total_tokens(session_mgr=smgr),
                     summary.total_cost if summary else 0.0,
                 )
@@ -418,24 +391,30 @@ class MessageProcessor:
         # Direct provider path (no tools)
         try:
             response = await manager.complete(
-                messages, model=model, stream=False,
-                temperature=temperature, max_tokens=max_tokens,
+                messages,
+                model=model,
+                stream=False,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
             assert isinstance(response, CompletionResponse)
 
             self._track_response(
-                session_id, response.content, response.model, response.cost,
-                session_mgr=smgr,
+                session_id, response.content, response.model, response.cost, session_mgr=smgr
             )
 
             total_tokens = response.usage.input_tokens + response.usage.output_tokens
             self._log_outgoing(
-                response.content, platform, platform_user_id, session_id,
-                total_tokens, response.cost,
+                response.content,
+                platform,
+                platform_user_id,
+                session_id,
+                total_tokens,
+                response.cost,
             )
 
             return ProcessedResponse(
-                content=response.content,
+                content=self._content_to_str(response.content),
                 model=response.model,
                 provider=response.provider,
                 input_tokens=response.usage.input_tokens,
@@ -464,43 +443,32 @@ class MessageProcessor:
         temperature: float = 0.7,
         max_tokens: int | None = None,
     ) -> AsyncIterator[StreamChunk]:
-        """Process a message and return streaming response.
-
-        Args:
-            query: User query
-            session_id: Optional session ID for context tracking
-            platform: Platform the message came from
-            platform_user_id: Platform-specific user ID
-            platform_username: Platform username/display name
-            model: Model to use (None = default)
-            skill_names: Explicit skill names to load
-            auto_skills: Whether to auto-discover skills
-            temperature: Sampling temperature
-            max_tokens: Maximum tokens in response
-
-        Yields:
-            StreamChunk objects with response content
-        """
+        """Process a message and return streaming response."""
         self._log_incoming(query, platform, platform_user_id, platform_username, session_id)
 
         smgr = self._resolve_session_manager(session_id)
         skills = await self._load_skills(query, skill_names, auto_skills)
-        messages = self._build_messages(query, skills, session_id, session_mgr=smgr)
-        smgr.set_model(model)
+        messages = self._context_builder.build_messages(
+            query, skills, session_id, session_manager=smgr
+        )
+        smgr.set_model(model or "default")
 
         try:
             manager = get_provider_manager()
         except Exception as e:
             logger.error(f"Failed to initialize provider: {e}")
-            yield StreamChunk(
-                content=f"Error: Failed to initialize provider: {e}", is_final=True
-            )
+            yield StreamChunk(content=f"Error: Failed to initialize provider: {e}", is_final=True)
             return
 
         # Agent loop path (tools enabled)
         if self._config.agent.enable_tools and self._tool_registry:
             async for chunk in self._stream_agent_loop(
-                manager, messages, model, session_id, platform, platform_user_id,
+                manager,
+                messages,
+                model,
+                session_id,
+                platform,
+                platform_user_id,
                 session_mgr=smgr,
             ):
                 yield chunk
@@ -510,13 +478,16 @@ class MessageProcessor:
         try:
             response_text = ""
             stream_response = await manager.complete(
-                messages, model=model, stream=True,
-                temperature=temperature, max_tokens=max_tokens,
+                messages,
+                model=model,
+                stream=True,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
 
             async for chunk in stream_response:  # type: ignore
                 response_text += chunk.content
-                yield StreamChunk(content=response_text, is_final=False)
+                yield StreamChunk(content=chunk.content, is_final=False)
 
             yield StreamChunk(content=response_text, is_final=True)
 
@@ -525,14 +496,19 @@ class MessageProcessor:
                     summary = manager.get_cost_summary()
                     resolved_model = manager.resolve_model(model)
                     smgr.add_assistant_message(
-                        response_text, model=resolved_model, cost=summary.total_cost,
+                        response_text,
+                        model=resolved_model,
+                        cost=summary.total_cost,
                     )
                 except Exception as e:
                     logger.error(f"Failed to track response in session: {e}")
 
             summary = manager.get_cost_summary()
             self._log_outgoing(
-                response_text, platform, platform_user_id, session_id,
+                response_text,
+                platform,
+                platform_user_id,
+                session_id,
                 self._session_total_tokens(session_mgr=smgr),
                 summary.total_cost if summary else 0.0,
             )
@@ -553,16 +529,7 @@ class MessageProcessor:
         skill_names: list[str] | None = None,
         auto_skills: bool = False,
     ) -> list[Skill]:
-        """Load skills for this query.
-
-        Args:
-            query: User query (for auto-discovery)
-            skill_names: Explicit skill names to load
-            auto_skills: Whether to auto-discover skills
-
-        Returns:
-            List of loaded skills
-        """
+        """Load skills for this query."""
         loaded_skills: list[Skill] = []
 
         # Explicit skill loading

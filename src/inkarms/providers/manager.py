@@ -272,7 +272,7 @@ class ProviderManager:
             cost=cost,
             finish_reason=response.choices[0].finish_reason or "unknown",
             created_at=datetime.now(),
-            raw=response.model_dump() if hasattr(response, "model_dump") else None,
+            raw=None,
         )
 
     async def _handle_failure(
