@@ -493,7 +493,6 @@ def validate(
             console.print("\n[bold]Configuration summary:[/bold]")
             console.print(f"  Model: {config.providers.default}")
             console.print(f"  Sandbox: {'enabled' if config.is_sandbox_enabled() else 'disabled'}")
-            console.print(f"  TUI: {'enabled' if config.tui.enable else 'disabled'}")
 
     except ConfigurationError as e:
         console.print(f"[red]Configuration error: {e}[/red]")
@@ -531,19 +530,10 @@ def init(
             help="Force overwrite (only valid with --quick for automation).",
         ),
     ] = False,
-    quick: Annotated[
-        bool,
-        typer.Option(
-            "--quick",
-            help="CLI inline wizard (instead of TUI).",
-        ),
-    ] = False,
 ) -> None:
     """Initialize InkArms configuration.
 
-    By default, launches TUI wizard for guided setup.
-    Use --quick for CLI inline wizard.
-    Use --quick --force for non-interactive automation.
+    By default, launches wizard for guided setup.
     """
     if project:
         # Initialize project config
@@ -566,7 +556,7 @@ def init(
             console.print("[dim]Use --force to overwrite.[/dim]")
 
     else:
-        # Interactive TUI wizard
+        # Interactive wizard
         try:
             from inkarms.ui.backends.rich_backend.backend import RichBackend
             from inkarms.config.wizard import RichWizard

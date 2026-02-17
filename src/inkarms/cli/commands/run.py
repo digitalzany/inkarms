@@ -11,7 +11,6 @@ Usage:
 
 import asyncio
 import json
-import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -659,22 +658,6 @@ def rerun(
             help="Override model for rerun.",
         ),
     ] = None,
-    task: Annotated[
-        str | None,
-        typer.Option(
-            "--task",
-            "-t",
-            help="Override task type for rerun.",
-        ),
-    ] = None,
-    deep: Annotated[
-        bool,
-        typer.Option(
-            "--deep",
-            "-d",
-            help="Enable deep thinking chain.",
-        ),
-    ] = False,
 ) -> None:
     """Re-run the last query with different settings."""
     session_manager = get_session_manager()

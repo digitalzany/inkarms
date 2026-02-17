@@ -97,8 +97,8 @@ class AgentLoop:
             )
         )
 
+    @staticmethod
     def _build_result(
-        self,
         *,
         success: bool,
         iterations: int,

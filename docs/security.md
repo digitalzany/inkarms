@@ -171,6 +171,8 @@ The sandbox executor provides safe command execution:
 - **Working directory** - Execute in specific directories
 - **Output capture** - Safely capture stdout/stderr
 
+**Implementation Note:** The sandbox uses Python's `subprocess.run` with `shlex` for command parsing and validation. It does not use Docker or containerization by default, so commands run on the host system (subject to the restrictions above).
+
 ### Timeout Configuration
 
 Prevent runaway processes:

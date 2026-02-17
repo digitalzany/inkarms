@@ -49,7 +49,7 @@ def create_directory_structure() -> dict[str, Path]:
     }
 
     for name, path in directories.items():
-        path.mkdir(parents=True, exist_ok=True)
+        path.mkdir(parents=True, exist_ok=True)  # exist_ok suppresses errors if directory already exists
 
         # Set restricted permissions on secrets directory (owner only)
         if name == "secrets":
@@ -82,157 +82,20 @@ def create_default_config(overwrite: bool = False) -> Path | None:
     return config_path
 
 
+def _get_defaults_dir() -> Path:
+    """Return the path to the bundled defaults directory."""
+    return Path(__file__).parent / "defaults"
+
+
 def _generate_default_config_yaml() -> str:
     """
-    Generate the default configuration YAML with helpful comments.
+    Load the default configuration YAML from the bundled defaults file.
 
     Returns:
         YAML string with default configuration.
     """
-    return """# InkArms Configuration
-# https://github.com/digitalzany/inkarms
-#
-# This is the global configuration file. Settings here apply to all sessions.
-# Use profiles for different contexts (e.g., work, personal, client projects).
-# Project-specific settings can be placed in .inkarms/project.yaml
-
-# =============================================================================
-# Provider Configuration
-# =============================================================================
-providers:
-  # Default model to use
-  default: "anthropic/claude-sonnet-4-20250514"
-
-  # Fallback models if primary fails (in order of preference)
-  fallback: []
-  #   - "anthropic/claude-3-haiku-20240307"
-  #   - "openai/gpt-4o-mini"
-
-  # Model aliases for convenience
-  aliases: {}
-  #   fast: "anthropic/claude-3-haiku-20240307"
-  #   smart: "anthropic/claude-sonnet-4-20250514"
-  #   opus: "anthropic/claude-opus-4-20250514"
-
-# =============================================================================
-# Context Management
-# =============================================================================
-context:
-  # Percentage of context window before auto-compaction (0.0-1.0)
-  auto_compact_threshold: 0.70
-
-  # Percentage of context window before handoff protection triggers
-  handoff_threshold: 0.85
-
-  compaction:
-    strategy: "summarize"  # summarize, truncate, sliding_window
-    preserve_recent_turns: 5
-
-  # Memory storage
-  memory_path: "~/.inkarms/memory"
-  daily_logs: true
-
-# =============================================================================
-# Security & Sandbox
-# =============================================================================
-security:
-  sandbox:
-    enable: true
-    mode: "whitelist"  # whitelist, blacklist, prompt, disabled
-
-  # Commands allowed in whitelist mode
-  whitelist:
-    - ls
-    - cat
-    - head
-    - tail
-    - grep
-    - find
-    - echo
-    - mkdir
-    - cp
-    - mv
-    - git
-    - python
-    - pip
-    - npm
-    - node
-
-  # Commands blocked in blacklist mode
-  blacklist:
-    - "rm -rf"
-    - sudo
-    - chmod
-    - chown
-    - "curl | bash"
-    - "wget | bash"
-    - dd
-
-  audit_log:
-    enable: true
-    path: "~/.inkarms/audit.jsonl"
-    rotation: "daily"
-    retention_days: 90
-
-# =============================================================================
-# Skills
-# =============================================================================
-skills:
-  local_path: "~/.inkarms/skills"
-  project_path: "./.inkarms/skills"
-
-  smart_index:
-    enable: true
-    mode: "keyword"  # keyword, llm, off
-
-# =============================================================================
-# Cost Management
-# =============================================================================
-cost:
-  budgets:
-    daily: null    # Set a number to enable (e.g., 5.00)
-    weekly: null
-    monthly: null
-
-  alerts:
-    warning_threshold: 0.80
-    block_on_exceed: false
-
-# =============================================================================
-# TUI Settings
-# =============================================================================
-tui:
-  enable: true
-  theme: "dark"  # dark, light, auto
-  keybindings: "default"  # default, vim, emacs
-
-  chat:
-    show_timestamps: true
-    show_token_count: true
-    show_cost: true
-    markdown_rendering: true
-    code_highlighting: true
-
-  status_bar:
-    show_model: true
-    show_context_usage: true
-    show_session_cost: true
-
-# =============================================================================
-# General Settings
-# =============================================================================
-general:
-  # Default profile to load (null for none)
-  default_profile: null
-
-  output:
-    format: "rich"  # rich, plain, json
-    color: true
-    verbose: false
-
-  storage:
-    backend: "file"  # file, sqlite
-"""
+    default_config_path = _get_defaults_dir() / "default_config.yaml"
+    return default_config_path.read_text(encoding="utf-8")
 
 
 def is_initialized() -> bool:

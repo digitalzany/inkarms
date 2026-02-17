@@ -4,8 +4,10 @@ import asyncio
 import logging
 from typing import Optional
 
-from inkarms.security.sandbox import SandboxExecutor
 from inkarms.tools.base import Tool
+from inkarms.config import get_config
+from inkarms.security.sandbox import SandboxExecutor
+from inkarms.storage.paths import get_custom_scripts_dir
 from inkarms.models.tools import ToolParameter, ToolResult
 
 logger = logging.getLogger(__name__)
@@ -52,6 +54,19 @@ class BashTool(Tool):
     @property
     def parameters(self) -> list[ToolParameter]:
         """Tool parameters."""
+        config = get_config()
+
+        commands_instruction = "Example: 'ls -la' or 'cat file.txt | grep pattern'"
+        if self._sandbox and self._sandbox.command_filter.mode == "blacklist":
+            bl = config.security.blacklist
+            commands_instruction = (
+                f"Blacklisted commands: {', '.join(bl.single_word_commands)}, "
+                f"Blacklisted patterns: {', '.join(bl.multi_word_patterns)}, "
+                f"Blocked after pipe: {', '.join(bl.pipe_to_interpreters)}"
+            )
+        elif self._sandbox and self._sandbox.command_filter.mode == "whitelist":
+            commands_instruction = f"Whitelisted commands: {', '.join(config.security.whitelist)}"
+
         return [
             ToolParameter(
                 name="command",
@@ -60,7 +75,7 @@ class BashTool(Tool):
                     "The bash command to execute. "
                     "Can be a single command or a pipeline. "
                     "Use '&&' to chain commands. "
-                    "Example: 'ls -la' or 'cat file.txt | grep pattern'"
+                    f"{commands_instruction}"
                 ),
                 required=True,
             ),
@@ -69,9 +84,10 @@ class BashTool(Tool):
                 type="string",
                 description=(
                     "Working directory for command execution. "
-                    "Defaults to current directory if not specified."
+                    f"Use default path {get_custom_scripts_dir().as_posix()} if nothing else explicitly specified in the prompt."  # some providers ignore default values, so add here too
                 ),
                 required=False,
+                default=get_custom_scripts_dir().as_posix(),
             ),
             ToolParameter(
                 name="timeout",

@@ -11,7 +11,6 @@ class PlatformType(str, Enum):
     """Supported messaging platforms."""
 
     CLI = "cli"
-    TUI = "tui"
     TELEGRAM = "telegram"
     SLACK = "slack"
     DISCORD = "discord"

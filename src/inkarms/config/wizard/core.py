@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 from inkarms.config.loader import load_config, load_yaml_file
 from inkarms.config.merger import deep_merge
-from inkarms.config.setup import create_directory_structure
+from inkarms.config.setup import create_directory_structure, create_default_config
 from inkarms.secrets import SecretsManager
 from inkarms.storage.paths import get_global_config_path
 
@@ -51,7 +51,7 @@ class WizardState(BaseModel):
     provider: str = "anthropic"
     model: str = "anthropic/claude-sonnet-4.5"
     api_key: Optional[str] = None
-    sandbox_mode: str = "whitelist"
+    sandbox_mode: str = "blacklist"
     enable_tools: bool = True
     config_path: Optional[Path] = None
 
@@ -105,9 +105,10 @@ def save_wizard_config(state: WizardState) -> Path:
     config_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Load existing user config to preserve non-wizard fields
-    existing_config: dict[str, Any] = {}
-    if config_path.exists():
-        existing_config = load_yaml_file(config_path)
+    if not config_path.exists():
+        create_default_config()
+
+    existing_config: dict[str, Any] = load_yaml_file(config_path)
 
     # Build only the fields the wizard actually changes
     wizard_updates: dict[str, Any] = {
@@ -121,40 +122,6 @@ def save_wizard_config(state: WizardState) -> Path:
             },
         },
     }
-
-    # Only set default whitelist/blacklist if they don't already exist
-    if "security" not in existing_config or "whitelist" not in existing_config.get(
-        "security", {}
-    ):
-        wizard_updates["security"]["whitelist"] = [
-            "ls",
-            "cat",
-            "head",
-            "tail",
-            "grep",
-            "find",
-            "echo",
-            "git",
-            "python",
-            "pip",
-            "npm",
-            "node",
-            "mkdir",
-            "cp",
-            "mv",
-        ]
-    if "security" not in existing_config or "blacklist" not in existing_config.get(
-        "security", {}
-    ):
-        wizard_updates["security"]["blacklist"] = [
-            "rm -rf",
-            "sudo",
-            "chmod",
-            "chown",
-            "dd",
-            "curl | bash",
-            "wget | bash",
-        ]
 
     # Merge advanced options if present
     if state.mode == "advanced" and state.advanced_options:

@@ -31,7 +31,6 @@ from inkarms.config.setup import (
 from inkarms.config.schema import (
     AuditLogConfig,
     BudgetConfig,
-    ChatConfig,
     CompactionConfig,
     Config,
     ContextConfig,
@@ -53,11 +52,9 @@ from inkarms.config.schema import (
     SkillRegistryConfig,
     SkillsConfig,
     SmartIndexConfig,
-    StatusBarConfig,
     StorageConfig,
     SystemPromptConfig,
     TaskRoutingConfig,
-    TuiConfig,
 )
 
 __all__ = [
@@ -85,7 +82,6 @@ __all__ = [
     # Schema
     "AuditLogConfig",
     "BudgetConfig",
-    "ChatConfig",
     "CompactionConfig",
     "Config",
     "ContextConfig",
@@ -107,9 +103,7 @@ __all__ = [
     "SkillRegistryConfig",
     "SkillsConfig",
     "SmartIndexConfig",
-    "StatusBarConfig",
     "StorageConfig",
     "SystemPromptConfig",
     "TaskRoutingConfig",
-    "TuiConfig",
 ]

@@ -7,8 +7,9 @@ This module defines all configuration models with validation.
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from inkarms.config.defaults import get_security_defaults
 from inkarms.config.providers import get_default_model
 
 # =============================================================================
@@ -155,7 +156,7 @@ class SandboxConfig(BaseModel):
     """Sandbox execution configuration."""
 
     enable: bool = True
-    mode: Literal["whitelist", "blacklist", "prompt", "disabled"] = "whitelist"
+    mode: Literal["whitelist", "blacklist", "prompt", "disabled"] = "blacklist"
 
 
 class RestrictedPathsConfig(BaseModel):
@@ -183,44 +184,74 @@ class AuditLogConfig(BaseModel):
     flush_interval_seconds: int = 5
 
 
+def _get_default_whitelist() -> list[str]:
+    """Load default whitelist from bundled config."""
+    return get_security_defaults().get("whitelist", [])
+
+
+def _get_default_blacklist() -> dict:
+    """Load default blacklist from bundled config."""
+    return get_security_defaults().get("blacklist", {})
+
+
+class BlacklistConfig(BaseModel):
+    """Structured command blacklist organized by category."""
+
+    model_config = ConfigDict(extra="allow")
+
+    single_word_commands: list[str] = Field(default_factory=list)
+    multi_word_patterns: list[str] = Field(default_factory=list)
+    sensitive_paths: list[str] = Field(default_factory=list)
+    dangerous_redirects: list[str] = Field(default_factory=list)
+    container_patterns: list[str] = Field(default_factory=list)
+    command_substitutions: list[str] = Field(default_factory=list)
+    dos_patterns: list[str] = Field(default_factory=list)
+    pipe_to_interpreters: list[str] = Field(default_factory=list)
+
+    def to_flat_list(self) -> list[str]:
+        """Return all patterns as a flat list."""
+        return (
+            self.single_word_commands
+            + self.multi_word_patterns
+            + self.sensitive_paths
+            + self.dangerous_redirects
+            + self.container_patterns
+            + self.command_substitutions
+            + self.dos_patterns
+            + self.pipe_to_interpreters
+        )
+
+
 class SecurityConfig(BaseModel):
     """Security and sandbox configuration."""
 
     model_config = ConfigDict(extra="allow")
 
     sandbox: SandboxConfig = Field(default_factory=SandboxConfig)
-    whitelist: list[str] = Field(
-        default_factory=lambda: [
-            "ls",
-            "cat",
-            "head",
-            "tail",
-            "grep",
-            "find",
-            "echo",
-            "mkdir",
-            "cp",
-            "mv",
-            "git",
-            "python",
-            "pip",
-            "npm",
-            "node",
-        ]
-    )
-    blacklist: list[str] = Field(
-        default_factory=lambda: [
-            "rm -rf",
-            "sudo",
-            "chmod",
-            "chown",
-            "curl | bash",
-            "wget | bash",
-            "dd",
-        ]
+    whitelist: list[str] = Field(default_factory=_get_default_whitelist)
+    blacklist: BlacklistConfig = Field(
+        default_factory=lambda: BlacklistConfig(**_get_default_blacklist())
     )
     restricted_paths: RestrictedPathsConfig = Field(default_factory=RestrictedPathsConfig)
     audit_log: AuditLogConfig = Field(default_factory=AuditLogConfig)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _migrate_flat_blacklist(cls, data: dict) -> dict:
+        """Convert legacy flat-list blacklist to structured BlacklistConfig format."""
+        if not isinstance(data, dict):
+            return data
+        blacklist = data.get("blacklist")
+        if isinstance(blacklist, list):
+            # Legacy format: flat list of strings (or dicts with key:comment)
+            patterns: list[str] = []
+            for item in blacklist:
+                if isinstance(item, str):
+                    patterns.append(item)
+                elif isinstance(item, dict):
+                    patterns.extend(item.keys())
+            data["blacklist"] = {"multi_word_patterns": patterns}
+        return data
 
 
 # =============================================================================
@@ -329,42 +360,6 @@ class UIConfig(BaseModel):
     max_recent_sessions: int = Field(default=10, ge=1, le=50)
     enable_mouse: bool = True
     enable_completion: bool = True
-
-
-# =============================================================================
-# TUI Configuration (Legacy - for backward compatibility)
-# =============================================================================
-
-
-class ChatConfig(BaseModel):
-    """TUI chat interface configuration."""
-
-    show_timestamps: bool = True
-    show_token_count: bool = True
-    show_cost: bool = True
-    markdown_rendering: bool = True
-    code_highlighting: bool = True
-    max_message_height: int = Field(default=50, ge=10)
-
-
-class StatusBarConfig(BaseModel):
-    """TUI status bar configuration."""
-
-    show_model: bool = True
-    show_context_usage: bool = True
-    show_session_cost: bool = True
-
-
-class TuiConfig(BaseModel):
-    """TUI (Text User Interface) configuration."""
-
-    model_config = ConfigDict(extra="allow")
-
-    enable: bool = True
-    theme: Literal["dark", "light", "auto"] = "dark"
-    keybindings: Literal["default", "vim", "emacs"] = "default"
-    chat: ChatConfig = Field(default_factory=ChatConfig)
-    status_bar: StatusBarConfig = Field(default_factory=StatusBarConfig)
 
 
 # =============================================================================
@@ -642,7 +637,6 @@ class Config(BaseModel):
     plugins: PluginsConfig = Field(default_factory=PluginsConfig)
     cost: CostConfig = Field(default_factory=CostConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
-    tui: TuiConfig = Field(default_factory=TuiConfig)
     platforms: PlatformsConfig = Field(default_factory=PlatformsConfig)
     general: GeneralConfig = Field(default_factory=GeneralConfig)
 

@@ -1,0 +1,237 @@
+# InkArms Configuration
+# https://github.com/digitalzany/inkarms
+#
+# This is the global configuration file. Settings here apply to all sessions.
+# Use profiles for different contexts (e.g., work, personal, client projects).
+# Project-specific settings can be placed in .inkarms/project.yaml
+
+# =============================================================================
+# Provider Configuration
+# =============================================================================
+providers:
+  # Default model to use
+  default: "anthropic/claude-sonnet-4-20250514"
+
+  # Fallback models if primary fails (in order of preference)
+  fallback: []
+  #   - "anthropic/claude-3-haiku-20240307"
+  #   - "openai/gpt-4o-mini"
+
+  # Model aliases for convenience
+  aliases: {}
+  #   fast: "anthropic/claude-3-haiku-20240307"
+  #   smart: "anthropic/claude-sonnet-4-20250514"
+  #   opus: "anthropic/claude-opus-4-20250514"
+
+# =============================================================================
+# Context Management
+# =============================================================================
+context:
+  # Percentage of context window before auto-compaction (0.0-1.0)
+  auto_compact_threshold: 0.70
+
+  # Percentage of context window before handoff protection triggers
+  handoff_threshold: 0.85
+
+  compaction:
+    strategy: "summarize"  # summarize, truncate, sliding_window
+    preserve_recent_turns: 5
+
+  # Memory storage
+  memory_path: "~/.inkarms/memory"
+  daily_logs: true
+
+# =============================================================================
+# Security & Sandbox
+# =============================================================================
+security:
+  sandbox:
+    enable: true
+    mode: "whitelist"  # whitelist, blacklist, prompt, disabled
+
+  # Commands allowed in whitelist mode
+  whitelist:
+    - ls
+    - cat
+    - head
+    - tail
+    - grep
+    - find
+    - echo
+    - mkdir
+    - cp
+    - mv
+    - git
+    - python
+    - pip
+    - npm
+    - node
+
+  # Commands blocked in blacklist mode (organized by category)
+  blacklist:
+    # Privilege escalation, ownership, permissions
+    single_word_commands:
+      - "sudo"
+      - "su"
+      - "doas"
+      - "pkexec"
+      - "setcap"
+      - "chown"
+      - "chmod"
+      - "setfacl"
+      - "shred"
+      - "wipefs"
+      - "mount"
+      - "umount"
+      - "fdisk"
+      - "parted"
+      - "losetup"
+      - "shutdown"
+      - "reboot"
+      - "halt"
+      - "poweroff"
+      - "init"
+      - "systemctl"
+      - "useradd"
+      - "userdel"
+      - "usermod"
+      - "passwd"
+      - "visudo"
+      - "crontab"
+      - "modprobe"
+      - "insmod"
+      - "rmmod"
+      - "kexec"
+      - "iptables"
+      - "ip6tables"
+      - "nftables"
+      - "nmap"
+      - "masscan"
+      - "zmap"
+      - "nsenter"
+      - "stress"
+      - "eval"
+      - "exec"
+      - "dd"
+      - "mkfs"
+      - "telnet"
+      - "curl"
+      - "wget"
+
+    # Multi-word dangerous command patterns
+    multi_word_patterns:
+      - "rm -rf"
+      - "rm -r"
+      - "bash -c"
+      - "bash -i"
+      - "sh -c"
+      - "sh -i"
+      - "/bin/bash -c"
+      - "/bin/sh -c"
+      - "/bin/bash -i"
+      - "/bin/sh -i"
+      - "nc -e"
+      - "ncat -e"
+      - "socat EXEC"
+      - "ufw disable"
+      - "docker exec -u 0"
+      - "sysctl -w"
+      - "find -exec"
+      - "xargs rm"
+      - "xargs chmod"
+
+    # Paths that should never be accessed or modified
+    sensitive_paths:
+      - "authorized_keys"
+      - "/etc/shadow"
+      - "/etc/sudoers"
+      - "/etc/systemd/"
+      - "/etc/profile"
+      - "/etc/passwd"
+      - "/.bashrc"
+      - "/.bash_profile"
+      - "/root/.ssh"
+      - "/proc/sys"
+      - "/dev/mem"
+      - "/dev/kmem"
+      - "/dev/tcp/"
+      - "/dev/udp/"
+
+    # Dangerous output redirections
+    dangerous_redirects:
+      - "> /dev/sd"
+      - "> /dev/nvme"
+      - "> /dev/hd"
+
+    # Container escape patterns
+    container_patterns:
+      - "--privileged"
+      - "-v /:/"
+      - "--pid=host"
+      - "--net=host"
+      - "--ipc=host"
+
+    # Command substitution / injection
+    command_substitutions:
+      - "$("
+      - "`"
+      - "< <"
+
+    # Resource exhaustion
+    dos_patterns:
+      - ":(){"
+      - "stress-ng"
+
+    # Interpreters that are dangerous when piped to (e.g., echo x | bash)
+    pipe_to_interpreters:
+      - "bash"
+      - "sh"
+      - "/bin/bash"
+      - "/bin/sh"
+      - "zsh"
+      - "/bin/zsh"
+
+  audit_log:
+    enable: true
+    path: "~/.inkarms/audit.jsonl"
+    rotation: "daily"
+    retention_days: 90
+
+# =============================================================================
+# Skills
+# =============================================================================
+skills:
+  local_path: "~/.inkarms/skills"
+  project_path: "./.inkarms/skills"
+
+  smart_index:
+    enable: true
+    mode: "keyword"  # keyword, llm, off
+
+# =============================================================================
+# Cost Management
+# =============================================================================
+cost:
+  budgets:
+    daily: null    # Set a number to enable (e.g., 5.00)
+    weekly: null
+    monthly: null
+
+  alerts:
+    warning_threshold: 0.80
+    block_on_exceed: false
+
+# =============================================================================
+# General Settings
+# =============================================================================
+general:
+  # Default profile to load (null for none)
+  default_profile: null
+
+  output:
+    format: "rich"  # rich, plain, json
+    color: true
+    verbose: false
+
+  storage:
+    backend: "file"  # file, sqlite

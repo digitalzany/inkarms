@@ -118,6 +118,16 @@ def get_audit_dir() -> Path:
     return get_inkarms_home() / "audit"
 
 
+def get_custom_scripts_dir() -> Path:
+    """
+    Get the directory for custom scripts.
+
+    Returns:
+        Path to ~/.inkarms/scripts/
+    """
+    return get_inkarms_home() / "scripts"
+
+
 def get_audit_log_path() -> Path:
     """
     Get the default audit log path.

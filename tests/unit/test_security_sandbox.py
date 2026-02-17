@@ -3,8 +3,14 @@
 import tempfile
 from pathlib import Path
 
+from inkarms.config.schema import BlacklistConfig
 from inkarms.security.sandbox import PathRestrictions, SandboxExecutor
 from inkarms.security.whitelist import CommandFilter
+
+
+def _empty_blacklist(**kwargs) -> BlacklistConfig:
+    """Create an empty BlacklistConfig with optional overrides."""
+    return BlacklistConfig(**kwargs)
 
 
 class TestPathRestrictions:
@@ -79,8 +85,10 @@ class TestSandboxExecutor:
 
     def test_check_command_with_whitelist(self) -> None:
         """Test command checking with whitelist."""
-        filter = CommandFilter(whitelist=["echo"], blacklist=[], mode="whitelist")
-        sandbox = SandboxExecutor(command_filter=filter)
+        cf = CommandFilter(
+            whitelist=["echo"], blacklist=_empty_blacklist(), mode="whitelist"
+        )
+        sandbox = SandboxExecutor(command_filter=cf)
 
         # Allowed command
         check = sandbox.check_command("echo hello")
@@ -92,10 +100,12 @@ class TestSandboxExecutor:
 
     def test_check_command_with_path_restrictions(self) -> None:
         """Test command checking with path restrictions."""
-        filter = CommandFilter(whitelist=["cat"], blacklist=[], mode="whitelist")
+        cf = CommandFilter(
+            whitelist=["cat"], blacklist=_empty_blacklist(), mode="whitelist"
+        )
         restrictions = PathRestrictions(no_access=["~/.ssh"])
         sandbox = SandboxExecutor(
-            command_filter=filter, path_restrictions=restrictions
+            command_filter=cf, path_restrictions=restrictions
         )
 
         # Allowed path
@@ -109,8 +119,10 @@ class TestSandboxExecutor:
 
     def test_execute_allowed_command(self) -> None:
         """Test executing an allowed command."""
-        filter = CommandFilter(whitelist=["echo"], blacklist=[], mode="whitelist")
-        sandbox = SandboxExecutor(command_filter=filter)
+        cf = CommandFilter(
+            whitelist=["echo"], blacklist=_empty_blacklist(), mode="whitelist"
+        )
+        sandbox = SandboxExecutor(command_filter=cf)
 
         result = sandbox.execute("echo hello world")
 
@@ -121,8 +133,10 @@ class TestSandboxExecutor:
 
     def test_execute_blocked_command(self) -> None:
         """Test executing a blocked command."""
-        filter = CommandFilter(whitelist=["echo"], blacklist=[], mode="whitelist")
-        sandbox = SandboxExecutor(command_filter=filter)
+        cf = CommandFilter(
+            whitelist=["echo"], blacklist=_empty_blacklist(), mode="whitelist"
+        )
+        sandbox = SandboxExecutor(command_filter=cf)
 
         result = sandbox.execute("rm -rf /")
 
@@ -133,8 +147,10 @@ class TestSandboxExecutor:
 
     def test_execute_with_working_directory(self) -> None:
         """Test executing command with custom working directory."""
-        filter = CommandFilter(whitelist=["pwd"], blacklist=[], mode="whitelist")
-        sandbox = SandboxExecutor(command_filter=filter)
+        cf = CommandFilter(
+            whitelist=["pwd"], blacklist=_empty_blacklist(), mode="whitelist"
+        )
+        sandbox = SandboxExecutor(command_filter=cf)
 
         with tempfile.TemporaryDirectory() as tmpdir:
             result = sandbox.execute("pwd", cwd=tmpdir)
@@ -144,8 +160,10 @@ class TestSandboxExecutor:
 
     def test_execute_with_timeout(self) -> None:
         """Test command timeout."""
-        filter = CommandFilter(whitelist=["sleep"], blacklist=[], mode="whitelist")
-        sandbox = SandboxExecutor(command_filter=filter)
+        cf = CommandFilter(
+            whitelist=["sleep"], blacklist=_empty_blacklist(), mode="whitelist"
+        )
+        sandbox = SandboxExecutor(command_filter=cf)
 
         result = sandbox.execute("sleep 10", timeout=1)
 
@@ -154,8 +172,10 @@ class TestSandboxExecutor:
 
     def test_execute_failing_command(self) -> None:
         """Test executing a command that fails."""
-        filter = CommandFilter(whitelist=["ls"], blacklist=[], mode="whitelist")
-        sandbox = SandboxExecutor(command_filter=filter)
+        cf = CommandFilter(
+            whitelist=["ls"], blacklist=_empty_blacklist(), mode="whitelist"
+        )
+        sandbox = SandboxExecutor(command_filter=cf)
 
         result = sandbox.execute("ls /nonexistent_directory_12345")
 
@@ -165,16 +185,16 @@ class TestSandboxExecutor:
 
     def test_is_enabled(self) -> None:
         """Test sandbox enabled check."""
-        filter_enabled = CommandFilter(
-            whitelist=["ls"], blacklist=[], mode="whitelist"
+        cf_enabled = CommandFilter(
+            whitelist=["ls"], blacklist=_empty_blacklist(), mode="whitelist"
         )
-        sandbox_enabled = SandboxExecutor(command_filter=filter_enabled)
+        sandbox_enabled = SandboxExecutor(command_filter=cf_enabled)
         assert sandbox_enabled.is_enabled() is True
 
-        filter_disabled = CommandFilter(
-            whitelist=[], blacklist=[], mode="disabled"
+        cf_disabled = CommandFilter(
+            whitelist=[], blacklist=_empty_blacklist(), mode="disabled"
         )
-        sandbox_disabled = SandboxExecutor(command_filter=filter_disabled)
+        sandbox_disabled = SandboxExecutor(command_filter=cf_disabled)
         assert sandbox_disabled.is_enabled() is False
 
     def test_from_config(self) -> None:
@@ -188,7 +208,7 @@ class TestSandboxExecutor:
         config = SecurityConfig(
             sandbox=SandboxConfig(enable=True, mode="whitelist"),
             whitelist=["ls", "cat"],
-            blacklist=["rm -rf"],
+            blacklist=BlacklistConfig(multi_word_patterns=["rm -rf"]),
             restricted_paths=RestrictedPathsConfig(
                 read_only=[], no_access=["~/.ssh"]
             ),
@@ -208,8 +228,10 @@ class TestSandboxExecutor:
 
     def test_execute_with_custom_env(self) -> None:
         """Test executing command with custom environment variables."""
-        filter = CommandFilter(whitelist=["printenv"], blacklist=[], mode="whitelist")
-        sandbox = SandboxExecutor(command_filter=filter)
+        cf = CommandFilter(
+            whitelist=["printenv"], blacklist=_empty_blacklist(), mode="whitelist"
+        )
+        sandbox = SandboxExecutor(command_filter=cf)
 
         result = sandbox.execute("printenv TEST_VAR", env={"TEST_VAR": "test_value"})
 
