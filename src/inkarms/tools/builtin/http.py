@@ -29,8 +29,8 @@ class HttpRequestTool(Tool):
     def description(self) -> str:
         """Tool description."""
         return (
-            "Make HTTP requests to web APIs. Supports GET, POST, PUT, DELETE methods "
-            "with authentication, custom headers, query parameters, and request body. "
+            "Use for HTTP requests to web APIs. For websearch use web_search tool."
+            "Supports GET, POST, PUT, DELETE methods with authentication, custom headers, query parameters, and request body. "
             "Parses JSON responses automatically."
         )
 

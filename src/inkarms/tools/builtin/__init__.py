@@ -15,6 +15,7 @@ from inkarms.tools.builtin.file import ListFilesTool, ReadFileTool, WriteFileToo
 from inkarms.tools.builtin.http import HttpRequestTool
 from inkarms.tools.builtin.registry_utils import register_builtin_tools
 from inkarms.tools.builtin.search import SearchFilesTool
+from inkarms.tools.builtin.web_search import BraveSearchTool
 
 # Optional tools (require extra dependencies)
 try:
@@ -33,12 +34,13 @@ except ImportError:
 
 __all__ = [
     "BashTool",
-    "ReadFileTool",
-    "WriteFileTool",
-    "ListFilesTool",
-    "SearchFilesTool",
-    "HttpRequestTool",
-    "PythonEvalTool",
+    "BraveSearchTool",
     "GitOperationsTool",
+    "HttpRequestTool",
+    "ListFilesTool",
+    "PythonEvalTool",
+    "ReadFileTool",
+    "SearchFilesTool",
+    "WriteFileTool",
     "register_builtin_tools",
 ]

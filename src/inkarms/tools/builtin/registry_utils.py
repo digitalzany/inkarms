@@ -7,6 +7,7 @@ from inkarms.tools.builtin.bash import BashTool
 from inkarms.tools.builtin.file import ListFilesTool, ReadFileTool, WriteFileTool
 from inkarms.tools.builtin.http import HttpRequestTool
 from inkarms.tools.builtin.search import SearchFilesTool
+from inkarms.tools.builtin.web_search import BraveSearchTool, get_brave_api_key
 from inkarms.tools.registry import ToolRegistry
 
 # Optional tools (require extra dependencies)
@@ -51,8 +52,14 @@ def register_builtin_tools(
     # HTTP request tool (dangerous)
     registry.register(HttpRequestTool())
 
-    # Python eval tool (dangerous, optional)
+    # Brave web search tool (safe, requires BRAVE_API_KEY env var or config key)
     tools_count = 6
+    if get_brave_api_key():
+        registry.register(BraveSearchTool())
+        tools_count += 1
+        logger.debug("Registered Brave web search tool")
+
+    # Python eval tool (dangerous, optional)
     if PYTHON_EVAL_AVAILABLE:
         # We know PythonEvalTool is defined if PYTHON_EVAL_AVAILABLE is True
         from inkarms.tools.builtin.python import PythonEvalTool  # type: ignore

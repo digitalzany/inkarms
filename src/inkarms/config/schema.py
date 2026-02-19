@@ -562,6 +562,25 @@ class ProfileMeta(BaseModel):
 
 
 # =============================================================================
+# Tools Configuration
+# =============================================================================
+
+
+class WebSearchToolConfig(BaseModel):
+    """Web search tool configuration."""
+
+    brave_api_key: str = ""
+
+
+class ToolsConfig(BaseModel):
+    """Tool-specific API keys and settings."""
+
+    model_config = ConfigDict(extra="allow")
+
+    web_search: WebSearchToolConfig = Field(default_factory=WebSearchToolConfig)
+
+
+# =============================================================================
 # Agent & Tool Use Configuration
 # =============================================================================
 
@@ -628,6 +647,7 @@ class Config(BaseModel):
     # Main configuration sections
     system_prompt: SystemPromptConfig = Field(default_factory=SystemPromptConfig)
     providers: ProviderConfig = Field(default_factory=ProviderConfig)
+    tools: ToolsConfig = Field(default_factory=ToolsConfig)
     agent: AgentConfigSchema = Field(default_factory=AgentConfigSchema)
     deep_thinking: DeepThinkingConfig = Field(default_factory=DeepThinkingConfig)
     task_routing: TaskRoutingConfig = Field(default_factory=TaskRoutingConfig)
