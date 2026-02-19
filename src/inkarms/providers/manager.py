@@ -310,7 +310,9 @@ class ProviderManager:
                 else:
                     response = await acompletion(**kwargs)
                     fallback.mark_success(next_provider)
-                    return self.parse_response(response, next_provider)
+                    result = self.parse_response(response, next_provider)
+                    result.fallback_from = original_kwargs["model"]
+                    return result
 
             except Exception as e:
                 fallback.mark_failed(next_provider, e)

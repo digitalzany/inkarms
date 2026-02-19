@@ -8,6 +8,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import re
 from collections.abc import AsyncIterator, Callable
 from datetime import datetime
 from typing import Any
@@ -181,6 +182,30 @@ class MessageProcessor:
         except Exception:
             return str(content)
 
+    @staticmethod
+    def _format_provider_error(error: Exception | str) -> str:
+        """Return a short, readable version of a LiteLLM provider error."""
+        err_str = str(error)
+
+        # Model not found (404 / NOT_FOUND)
+        if "NotFoundError" in err_str or "NOT_FOUND" in err_str or "404" in err_str:
+            m = re.search(r"models/([^\s'\"\\]+)", err_str)
+            model_hint = f" '{m.group(1)}'" if m else ""
+            return (
+                f"Model{model_hint} not found. "
+                "Use /model to change model or /models to list available models."
+            )
+
+        # Try to pull the provider's own error message from embedded JSON
+        m = re.search(r'"message"\s*:\s*"([^"]+)"', err_str)
+        if m:
+            return m.group(1)
+
+        # Truncate very long raw errors
+        if len(err_str) > 300:
+            return err_str[:300] + "…"
+        return err_str
+
     def _create_agent(
         self,
         manager,
@@ -284,24 +309,30 @@ class MessageProcessor:
                         yield chunk
 
             result = agent_task.result()
-            yield StreamChunk(content=result.final_response, is_final=True)
+            if result.error:
+                yield StreamChunk(
+                    content=f"Error: {self._format_provider_error(result.error)}",
+                    is_final=True,
+                )
+            else:
+                yield StreamChunk(content=result.final_response, is_final=True)
 
-            summary = manager.get_cost_summary()
-            self._track_response(
-                session_id,
-                result.final_response,
-                mgr.model or "unknown",
-                summary.total_cost if summary else 0.0,
-                session_mgr=mgr,
-            )
-            self._log_outgoing(
-                result.final_response,
-                platform,
-                platform_user_id,
-                session_id,
-                self._session_total_tokens(session_mgr=mgr),
-                summary.total_cost if summary else 0.0,
-            )
+                summary = manager.get_cost_summary()
+                self._track_response(
+                    session_id,
+                    result.final_response,
+                    mgr.model or "unknown",
+                    summary.total_cost if summary else 0.0,
+                    session_mgr=mgr,
+                )
+                self._log_outgoing(
+                    result.final_response,
+                    platform,
+                    platform_user_id,
+                    session_id,
+                    self._session_total_tokens(session_mgr=mgr),
+                    summary.total_cost if summary else 0.0,
+                )
         except Exception as e:
             logger.error(f"Agent loop error: {e}", exc_info=True)
             yield StreamChunk(content=f"Error: Agent loop error: {e}", is_final=True)
@@ -340,7 +371,9 @@ class MessageProcessor:
         messages = self._context_builder.build_messages(
             query, skills, session_id, session_manager=smgr
         )
-        smgr.set_model(model or "default")
+        if model:
+            smgr.set_model(model)
+        effective_model = model or smgr.model or None
 
         try:
             manager = get_provider_manager()
@@ -353,7 +386,7 @@ class MessageProcessor:
             try:
                 agent = self._create_agent(manager)
                 message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
-                result = await agent.run(message_dicts, model=model)
+                result = await agent.run(message_dicts, model=effective_model)
                 summary = manager.get_cost_summary()
 
                 self._track_response(
@@ -374,7 +407,7 @@ class MessageProcessor:
 
                 return ProcessedResponse(
                     content=result.final_response,
-                    model=model or "unknown",
+                    model=effective_model or "unknown",
                     provider=self._config.providers.default or "unknown",
                     input_tokens=summary.total_input_tokens if summary else 0,
                     output_tokens=summary.total_output_tokens if summary else 0,
@@ -392,12 +425,19 @@ class MessageProcessor:
         try:
             response = await manager.complete(
                 messages,
-                model=model,
+                model=effective_model,
                 stream=False,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
             assert isinstance(response, CompletionResponse)
+
+            if response.fallback_from and isinstance(response.content, str):
+                notice = (
+                    f"⚠️ *Note:* Model `{response.fallback_from}` was unavailable. "
+                    f"Response generated with fallback: `{response.model}`\n\n"
+                )
+                response.content = notice + response.content
 
             self._track_response(
                 session_id, response.content, response.model, response.cost, session_mgr=smgr
@@ -428,7 +468,7 @@ class MessageProcessor:
             return self._make_error_response(f"Authentication failed: {e}")
         except (AllProvidersFailedError, ProviderError) as e:
             logger.error(f"Provider error: {e}")
-            return self._make_error_response(f"Provider error: {e}")
+            return self._make_error_response(self._format_provider_error(e))
 
     async def process_streaming(
         self,
@@ -451,7 +491,9 @@ class MessageProcessor:
         messages = self._context_builder.build_messages(
             query, skills, session_id, session_manager=smgr
         )
-        smgr.set_model(model or "default")
+        if model:
+            smgr.set_model(model)
+        effective_model = model or smgr.model or None
 
         try:
             manager = get_provider_manager()
@@ -465,7 +507,7 @@ class MessageProcessor:
             async for chunk in self._stream_agent_loop(
                 manager,
                 messages,
-                model,
+                effective_model,
                 session_id,
                 platform,
                 platform_user_id,
@@ -479,7 +521,7 @@ class MessageProcessor:
             response_text = ""
             stream_response = await manager.complete(
                 messages,
-                model=model,
+                model=effective_model,
                 stream=True,
                 temperature=temperature,
                 max_tokens=max_tokens,
@@ -494,7 +536,7 @@ class MessageProcessor:
             if session_id:
                 try:
                     summary = manager.get_cost_summary()
-                    resolved_model = manager.resolve_model(model)
+                    resolved_model = manager.resolve_model(effective_model)
                     smgr.add_assistant_message(
                         response_text,
                         model=resolved_model,
@@ -518,10 +560,14 @@ class MessageProcessor:
             yield StreamChunk(content=f"Error: Authentication failed: {e}", is_final=True)
         except AllProvidersFailedError as e:
             logger.error(f"All providers failed: {e}")
-            yield StreamChunk(content=f"Error: All providers failed: {e}", is_final=True)
+            yield StreamChunk(
+                content=f"Error: {self._format_provider_error(e)}", is_final=True
+            )
         except ProviderError as e:
             logger.error(f"Provider error: {e}")
-            yield StreamChunk(content=f"Error: Provider error: {e}", is_final=True)
+            yield StreamChunk(
+                content=f"Error: {self._format_provider_error(e)}", is_final=True
+            )
 
     async def _load_skills(
         self,

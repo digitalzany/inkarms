@@ -11,7 +11,10 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, ClassVar
 
+from inkarms.config.loader import clear_config_cache, get_config, load_yaml_file, save_yaml_file
+from inkarms.config.providers import get_model_choices, get_provider_choices, load_providers_config
 from inkarms.models.agent import ApprovalMode
+from inkarms.storage.paths import get_inkarms_home
 
 if TYPE_CHECKING:
     from inkarms.memory.manager import SessionManager
@@ -48,7 +51,7 @@ def cmd_help(_ctx: CommandContext, _arg: str) -> CommandResult:
     return CommandResult(
         message=(
             "Commands: /help /clear /usage /status /save [name] "
-            "/load <name> /history /model [name] /tools /agent [mode]"
+            "/load <name> /history /model [name] /models /tools /agent [mode]"
         )
     )
 
@@ -143,58 +146,129 @@ def cmd_history(ctx: CommandContext, _arg: str) -> CommandResult:
     return CommandResult(message="Session manager not available")
 
 
+def _resolve_model_arg(arg: str, current_provider: str) -> tuple[str, str | None]:
+    """Resolve and validate a model argument.
+
+    Accepts 'provider/model' (validates provider exists) or bare 'model'
+    (auto-resolves to current_provider/model). Model IDs are NOT validated
+    against our static config — the provider validates at request time.
+
+    Returns (resolved_full_model, error_message). error_message is None if valid.
+    """
+    providers = load_providers_config()
+
+    if "/" in arg:
+        provider_id, model_id = arg.split("/", 1)
+        if provider_id not in providers:
+            known = ", ".join(sorted(providers.keys()))
+            return "", f"Unknown provider '{provider_id}'. Known providers: {known}"
+        return f"{provider_id}/{model_id}", None
+
+    # Bare model name — always use current provider
+    model_id = arg
+    if not current_provider:
+        known = ", ".join(sorted(providers.keys()))
+        return "", (
+            f"No current provider set. Specify as <provider>/<model>.\n"
+            f"Known providers: {known}"
+        )
+    if current_provider not in providers:
+        known = ", ".join(sorted(providers.keys()))
+        return "", f"Current provider '{current_provider}' is unknown. Known: {known}"
+
+    return f"{current_provider}/{model_id}", None
+
+
 def cmd_model(ctx: CommandContext, arg: str) -> CommandResult:
-    """Show or change model. Lists available models when called without args."""
-    if arg and ctx.session_manager:
-        ctx.session_manager.set_model(arg)
+    """Show or change model. Accepts provider/model or bare model name."""
+    if arg:
+        current_provider = ctx.provider or (
+            ctx.model.split("/")[0] if ctx.model and "/" in ctx.model else ""
+        )
+        resolved, error = _resolve_model_arg(arg, current_provider)
+        if error:
+            return CommandResult(message=f"Invalid model: {error}")
+        if ctx.session_manager:
+            ctx.session_manager.set_model(resolved)
+        saved = _save_model_to_config(resolved)
+        suffix = " (saved to config)" if saved else " (session only — config save failed)"
+        return CommandResult(message=f"Model changed to: {resolved}{suffix}")
 
-        return CommandResult(message=f"Model changed to: {arg}")
-
-    # Show current model and available models
-    parts = [f"Current model: {ctx.model}"]
-
+    # Show current model and last 5 available models
+    lines = [f"Current model: {ctx.model or '(not set)'}"]
     available = _get_available_models(ctx)
     if available:
-        parts.append(f"Available: {', '.join(available)}")
-        parts.append("Usage: /model <name>")
+        preview = available[-5:]
+        total = len(available)
+        lines.append(f"\nRecent models (last {len(preview)} of {total}):")
+        for m in preview:
+            lines.append(f"  \u2022 {m}")
+        lines.append("\nUse /model <model> to change | /models for all")
+    else:
+        lines.append("No models found for current provider")
 
-    return CommandResult(message=" | ".join(parts))
+    return CommandResult(message="\n".join(lines))
 
 
-def _get_available_models(ctx: CommandContext = None) -> list[str]:
-    """Collect available model names from config."""
+def _save_model_to_config(model: str) -> bool:
+    """Persist model change to user config. Returns True on success."""
     try:
-        from inkarms.config import get_config
-        from inkarms.config.providers import get_model_choices
+        config_path = get_inkarms_home() / "config.yaml"
+        config_dict = load_yaml_file(config_path) if config_path.exists() else {}
+        if "providers" not in config_dict:
+            config_dict["providers"] = {}
+        config_dict["providers"]["default"] = model
+        save_yaml_file(config_path, config_dict)
+        clear_config_cache()
+        return True
+    except Exception:
+        return False
 
-        # config = get_config()
-        models: list[str] = []
 
-        # Default model
-        # if config.providers.default:
-        #     models.append(config.providers.default)
-
-        # Fallback chain
-        # for fb in config.providers.fallback:
-        #     if fb not in models:
-        #         models.append(fb)
-
-        # Aliases (show alias → target)
-        # for alias, target in config.providers.aliases.items():
-        #     label = f"{alias} ({target})" if target not in models else alias
-        #     if label not in models:
-        #         models.append(label)
-
-        if ctx:
+def _get_available_models(ctx: CommandContext | None = None) -> list[str]:
+    """Collect available model names from config for the current provider."""
+    try:
+        provider = ""
+        if ctx and ctx.provider:
             provider = ctx.provider.split("/")[0] if "/" in ctx.provider else ctx.provider
-            provider_models = get_model_choices(provider)
-            for model in provider_models:
-                models.append(model[0])
 
-        return models
+        if not provider:
+            try:
+                default = get_config().providers.default
+                provider = default.split("/")[0] if "/" in default else default
+            except Exception:
+                pass
+
+        if not provider:
+            return []
+
+        return [f"{provider}/{m[0]}" for m in get_model_choices(provider)]
 
     except Exception:
         return []
+
+
+def cmd_models(_ctx: CommandContext, _arg: str) -> CommandResult:
+    """Show all available providers and their models."""
+    try:
+        providers = get_provider_choices()
+        if not providers:
+            return CommandResult(message="No providers configured")
+
+        lines = ["Available providers and models:"]
+        for provider_id, provider_name, _ in providers:
+            models = get_model_choices(provider_id)
+            lines.append(f"\n{provider_name} ({len(models)} models):")
+            for model_id, model_name, _ in models:
+                label = f"  \u2022 {model_id}"
+                if model_name and model_name != model_id:
+                    label += f" \u2014 {model_name}"
+                lines.append(label)
+
+        lines.append("\nUse /model <provider>/<name> to change")
+        return CommandResult(message="\n".join(lines))
+    except Exception as e:
+        return CommandResult(message=f"Error loading models: {e}")
 
 
 def cmd_tools(ctx: CommandContext, _arg: str) -> CommandResult:
@@ -263,6 +337,7 @@ class CommandRegistry:
         "/load": ("Load session snapshot", cmd_load),
         "/history": ("Show message history", cmd_history),
         "/model": ("Show/change model", cmd_model),
+        "/models": ("Show all providers and models", cmd_models),
         "/tools": ("Show registered tools", cmd_tools),
         "/agent": ("Show/change agent settings", cmd_agent),
     }

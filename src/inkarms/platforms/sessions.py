@@ -54,10 +54,7 @@ class PlatformSessionStore:
             return get_session_manager(model=model)
 
         if session_id in self._managers:
-            mgr = self._managers[session_id]
-            if model and mgr.model != model:
-                mgr.set_model(model)
-            return mgr
+            return self._managers[session_id]
 
         storage_path = self._base_path / session_id
         mgr = SessionManager(model=model, storage_path=storage_path)

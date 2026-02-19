@@ -396,8 +396,7 @@ class MessageRouter:
         provider = ""
         if session_mgr:
             model = session_mgr.model or ""
-            info = session_mgr.get_session_info()
-            provider = info.get("model", "")
+            provider = model.split("/")[0] if "/" in model else ""
 
         return CommandContext(
             session_manager=session_mgr,

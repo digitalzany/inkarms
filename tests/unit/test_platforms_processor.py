@@ -346,7 +346,7 @@ class TestMessageProcessor:
             )
 
             assert response.error is not None
-            assert "Provider error" in response.error
+            assert "Rate limit exceeded" in response.error
             assert response.finish_reason == "error"
 
     @pytest.mark.asyncio

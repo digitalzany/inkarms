@@ -87,6 +87,9 @@ class CompletionResponse:
     # Raw response for debugging
     raw: dict[str, Any] | None = None
 
+    # Set when a fallback model was used instead of the requested one
+    fallback_from: str | None = None
+
     def model_dump(self) -> dict[str, Any]:
         """Convert to dict format (for agent loop compatibility)."""
         return {
