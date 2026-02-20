@@ -49,6 +49,7 @@ class BashTool(Tool):
             "Use this for: running CLI tools, file operations, system queries, "
             "package installation, git operations, etc. "
             "Avoid long-running commands (timeout: 30s default)."
+            f"Use {get_custom_scripts_dir().as_posix()} as working directory if nothing else explicitly specified in the prompt."
         )
 
     @property
@@ -84,7 +85,6 @@ class BashTool(Tool):
                 type="string",
                 description=(
                     "Working directory for command execution. "
-                    f"Use default path {get_custom_scripts_dir().as_posix()} if nothing else explicitly specified in the prompt."  # some providers ignore default values, so add here too
                 ),
                 required=False,
                 default=get_custom_scripts_dir().as_posix(),

@@ -235,3 +235,7 @@ general:
 
   storage:
     backend: "file"  # file, sqlite
+
+tools:
+  web_search:
+    brave_api_key: ""
