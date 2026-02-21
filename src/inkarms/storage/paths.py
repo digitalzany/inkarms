@@ -148,6 +148,39 @@ def get_sqlite_db_path() -> Path:
     return get_inkarms_home() / "data.db"
 
 
+def get_hub_db_path() -> Path:
+    """
+    Get the hub SQLite database path.
+
+    Distinct from data.db (used by StorageConfig).
+    hub.db stores session_index, cron_jobs, and daily_cost for the hub daemon.
+
+    Returns:
+        Path to ~/.inkarms/hub.db
+    """
+    return get_inkarms_home() / "hub.db"
+
+
+def get_hub_pid_path() -> Path:
+    """
+    Get the hub PID file path.
+
+    Returns:
+        Path to ~/.inkarms/hub.pid
+    """
+    return get_inkarms_home() / "hub.pid"
+
+
+def get_hub_log_path() -> Path:
+    """
+    Get the hub log file path.
+
+    Returns:
+        Path to ~/.inkarms/logs/hub.log
+    """
+    return get_inkarms_home() / "logs" / "hub.log"
+
+
 def find_project_config(start_path: Path | None = None) -> Path | None:
     """
     Find the project configuration file by traversing up the directory tree.

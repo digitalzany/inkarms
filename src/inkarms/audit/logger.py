@@ -64,6 +64,13 @@ class AuditEventType(str, Enum):
     PLATFORM_ADAPTER_STOPPED = "platform_adapter_stopped"
     PLATFORM_ADAPTER_ERROR = "platform_adapter_error"
 
+    # Hub daemon events
+    HUB_STARTED = "hub_started"
+    HUB_STOPPED = "hub_stopped"
+    HUB_REQUEST = "hub_request"
+    HUB_CRON_RUN = "hub_cron_run"
+    HUB_TRIGGER_FIRED = "hub_trigger_fired"
+
 
 class AuditLogger:
     """
@@ -180,7 +187,8 @@ class AuditLogger:
 
         return redacted
 
-    def _hash_text(self, text: str) -> str:
+    @staticmethod
+    def _hash_text(text: str) -> str:
         """
         Hash text for privacy-preserving logging.
 
@@ -192,9 +200,8 @@ class AuditLogger:
         """
         return hashlib.sha256(text.encode()).hexdigest()
 
-    def _create_event(
-        self, event_type: AuditEventType, data: dict[str, Any]
-    ) -> dict[str, Any]:
+    @staticmethod
+    def _create_event(event_type: AuditEventType, data: dict[str, Any]) -> dict[str, Any]:
         """
         Create an audit event.
 
@@ -296,7 +303,8 @@ class AuditLogger:
         # Clean old logs
         self._clean_old_logs()
 
-    def _compress_log(self, log_path: Path) -> None:
+    @staticmethod
+    def _compress_log(log_path: Path) -> None:
         """Compress a log file with gzip."""
         compressed_path = log_path.with_suffix(log_path.suffix + ".gz")
 
@@ -592,6 +600,80 @@ class AuditLogger:
             {
                 "platform": platform,
                 "error": error,
+            },
+        )
+        self._write_event(event)
+
+    # Hub daemon events
+
+    def log_hub_started(self, host: str, port: int) -> None:
+        """Log hub daemon start."""
+        event = self._create_event(
+            AuditEventType.HUB_STARTED,
+            {"host": host, "port": port},
+        )
+        self._write_event(event)
+
+    def log_hub_stopped(self, uptime_seconds: float) -> None:
+        """Log hub daemon stop."""
+        event = self._create_event(
+            AuditEventType.HUB_STOPPED,
+            {"uptime_seconds": uptime_seconds},
+        )
+        self._write_event(event)
+
+    def log_hub_request(
+        self,
+        method: str,
+        path: str,
+        status_code: int,
+        duration_ms: float,
+    ) -> None:
+        """Log an authenticated hub API request."""
+        event = self._create_event(
+            AuditEventType.HUB_REQUEST,
+            {
+                "method": method,
+                "path": path,
+                "status_code": status_code,
+                "duration_ms": duration_ms,
+            },
+        )
+        self._write_event(event)
+
+    def log_hub_cron_run(
+        self,
+        job_id: str,
+        job_type: str,
+        success: bool,
+        duration_ms: float,
+        error: str | None = None,
+    ) -> None:
+        """Log a cron job execution."""
+        data: dict[str, Any] = {
+            "job_id": job_id,
+            "job_type": job_type,
+            "success": success,
+            "duration_ms": duration_ms,
+        }
+        if error:
+            data["error"] = error
+        event = self._create_event(AuditEventType.HUB_CRON_RUN, data)
+        self._write_event(event)
+
+    def log_hub_trigger_fired(
+        self,
+        trigger_name: str,
+        session_id: str,
+        status_code: int,
+    ) -> None:
+        """Log a webhook trigger invocation."""
+        event = self._create_event(
+            AuditEventType.HUB_TRIGGER_FIRED,
+            {
+                "trigger_name": trigger_name,
+                "session_id": session_id,
+                "status_code": status_code,
             },
         )
         self._write_event(event)

@@ -12,6 +12,7 @@ from inkarms import __version__
 from inkarms.cli.commands import (
     audit,
     config,
+    hub,
     memory,
     platforms,
     profile,
@@ -102,6 +103,7 @@ app.add_typer(status.app, name="status")
 app.add_typer(audit.app, name="audit")
 app.add_typer(profile.app, name="profile")
 app.add_typer(platforms.app, name="platforms")
+app.add_typer(hub.app, name="hub")
 
 
 def _launch_ui(backend: str | None = None) -> None:

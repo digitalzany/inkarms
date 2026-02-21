@@ -132,6 +132,45 @@ Don't get locked into one vendor. InkArms sits on top of [LiteLLM](https://githu
 *   **Smart Fallbacks:** If OpenAI is down, automatically fail over to Anthropic or Azure.
 *   **Cost Tracking:** See exactly how much each command costs before you run it (optional).
 
+## 🌐 InkArms Hub (Always-On Daemon)
+
+Run InkArms as a persistent background service with a REST + WebSocket API, scheduled jobs, and webhook triggers.
+
+```bash
+# Install hub dependencies
+pip install "inkarms[hub]"
+
+# Start in background
+inkarms hub start --background
+
+# Check status
+inkarms hub status         # "Running on 127.0.0.1:18750 — uptime=42s model=claude-sonnet-4-6"
+
+# Install as a system service (auto-start at login)
+inkarms hub install
+
+# Chat via WebSocket
+wscat -c "ws://127.0.0.1:18750/ws/chat/my-project"
+# send: {"type":"auth","token":"<key>"}
+# send: {"type":"message","content":"what files changed today?"}
+```
+
+**What the Hub adds:**
+
+| Feature | Description |
+| :--- | :--- |
+| **Always-on platforms** | Telegram/Slack/Discord stay running without `inkarms platforms start` |
+| **REST API** | `GET /api/sessions`, `GET /api/status`, `GET /api/budget`, and more |
+| **WebSocket chat** | Streaming chat with full tool execution via `/ws/chat/{session_id}` |
+| **Cron jobs** | Schedule bash commands and AI queries — `POST /api/cron` |
+| **Webhook triggers** | Fire AI actions from GitHub, CI, or any HTTP source — `POST /triggers/{name}` |
+| **OpenAI proxy** | Drop-in `/v1/chat/completions` for Continue.dev, Open WebUI, etc. |
+| **Budget enforcement** | Daily cost limits enforced in real time (zero DB queries on hot path) |
+
+→ [**Hub Reference**](docs/hub.md) | [**Trigger Routes**](docs/hub-triggers.md) | [**Cron Jobs**](docs/hub-cron.md)
+
+---
+
 ## 📚 Documentation
 
 Detailed documentation is available in the `docs/` directory:
@@ -139,6 +178,9 @@ Detailed documentation is available in the `docs/` directory:
 - [**User Guide**](docs/user_guide.md) — Getting started
 - [**UI Guide**](docs/tui_guide.md) — Interactive interface, chat & config wizard
 - [**Platform Setup**](docs/platforms.md) — Telegram, Slack, Discord
+- [**Hub Daemon**](docs/hub.md) — Always-on daemon, REST API, WebSocket chat
+- [**Hub Triggers**](docs/hub-triggers.md) — Webhook trigger routes
+- [**Hub Cron Jobs**](docs/hub-cron.md) — Scheduled bash and AI jobs
 - [**Advanced Tools**](docs/advanced_tool_use.md) — HTTP, Python, Git
 - [**Security & Sandbox**](docs/security.md) — Safety features
 - [**Configuration**](docs/configuration.md) — Settings reference
