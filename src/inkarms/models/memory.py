@@ -53,6 +53,9 @@ class ConversationTurn(BaseModel):
     is_compacted: bool = False  # Was this turn summarized?
     original_turn_ids: list[str] = Field(default_factory=list)  # IDs of turns that were compacted
 
+    # Reasoning content from reasoning-capable models (LiteLLM standard field)
+    reasoning_content: str | None = None
+
     class Config:
         """Pydantic configuration."""
 
@@ -60,7 +63,10 @@ class ConversationTurn(BaseModel):
 
     def to_message_dict(self) -> dict[str, Any]:
         """Convert to LiteLLM-compatible message dict."""
-        return {"role": self.role, "content": self.content}
+        result: dict[str, Any] = {"role": self.role, "content": self.content}
+        if self.reasoning_content is not None:
+            result["reasoning_content"] = self.reasoning_content
+        return result
 
 
 class SessionMetadata(BaseModel):
@@ -140,6 +146,7 @@ class Session(BaseModel):
         token_count: int = 0,
         model: str | None = None,
         cost: float | None = None,
+        reasoning_content: str | None = None,
     ) -> ConversationTurn:
         """Add an assistant message."""
         turn = ConversationTurn(
@@ -148,6 +155,7 @@ class Session(BaseModel):
             token_count=token_count,
             model=model,
             cost=cost,
+            reasoning_content=reasoning_content,
         )
         self.add_turn(turn)
         return turn

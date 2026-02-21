@@ -154,6 +154,7 @@ class SessionManager:
         content: str,
         model: str | None = None,
         cost: float | None = None,
+        reasoning_content: str | None = None,
     ) -> ConversationTurn:
         """Add an assistant message to the session.
 
@@ -161,6 +162,7 @@ class SessionManager:
             content: Message content.
             model: Model that generated the response.
             cost: Cost of the response.
+            reasoning_content: Reasoning content from reasoning-capable models.
 
         Returns:
             Created turn.
@@ -175,6 +177,7 @@ class SessionManager:
             token_count=token_count,
             model=resolved_model,
             cost=cost,
+            reasoning_content=reasoning_content,
         )
         self.tracker.add_turn(turn)
         self.persister.auto_save(self._session)  # type: ignore[arg-type]

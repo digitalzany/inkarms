@@ -13,7 +13,7 @@ from datetime import datetime
 from typing import Any
 
 import litellm
-from litellm import acompletion, completion_cost
+from litellm import acompletion, completion_cost, stream_chunk_builder
 
 from inkarms.config.schema import ProviderConfig
 from inkarms.models.providers import (
@@ -117,6 +117,28 @@ class ProviderManager:
         """Convert internal messages to LiteLLM format."""
         return [msg.to_dict() for msg in messages]
 
+    @staticmethod
+    def _normalize_reasoning_content(
+        model: str, messages: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        """Ensure all assistant messages have reasoning_content for models that require it.
+
+        Uses litellm.supports_reasoning() to detect capability — no provider names hardcoded.
+        Injects empty string for messages that predate this feature (backward compat).
+        """
+        try:
+            from litellm import supports_reasoning
+
+            if not supports_reasoning(model=model):
+                return messages
+        except Exception:
+            return messages
+
+        for msg in messages:
+            if msg.get("role") == "assistant" and "reasoning_content" not in msg:
+                msg["reasoning_content"] = ""
+        return messages
+
     async def complete(
         self,
         messages: list[Message],
@@ -152,8 +174,9 @@ class ProviderManager:
         resolved_model = self.resolve_model(model)
         logger.info(f"Completing with model: {resolved_model}")
 
-        # Convert messages
+        # Convert messages and normalize provider-required fields
         litellm_messages = self._to_litellm_messages(messages)
+        litellm_messages = self._normalize_reasoning_content(resolved_model, litellm_messages)
 
         # Build request kwargs
         request_kwargs: dict[str, Any] = {
@@ -195,19 +218,36 @@ class ProviderManager:
             **kwargs: Arguments for acompletion.
 
         Yields:
-            StreamChunk for each response chunk.
+            StreamChunk for each response chunk, then a final empty chunk that
+            carries reasoning_content (set when the model returned one).
         """
         model = kwargs.get("model", "unknown")
         if model == "unknown":
             logger.warning("_stream_completion called without model in kwargs")
         response = await acompletion(**kwargs)
+        all_chunks: list[Any] = []
         async for chunk in response:  # type: ignore
+            all_chunks.append(chunk)
             if chunk.choices and chunk.choices[0].delta.content:
                 yield StreamChunk(
                     content=chunk.choices[0].delta.content,
                     finish_reason=chunk.choices[0].finish_reason,
                     model=model,
                 )
+
+        # Extract reasoning_content from the aggregated response and emit it
+        # on a final empty chunk so callers can store it without changing the
+        # streaming protocol for normal content.
+        reasoning_content: str | None = None
+        if all_chunks:
+            try:
+                full = stream_chunk_builder(all_chunks)
+                reasoning_content = (
+                    getattr(full.choices[0].message, "reasoning_content", None) or None
+                )
+            except Exception:
+                pass
+        yield StreamChunk(content="", finish_reason="stop", model=model, reasoning_content=reasoning_content)
 
     def parse_response(
         self,
@@ -264,6 +304,8 @@ class ProviderManager:
                 })
             content = content_blocks
 
+        reasoning_content: str | None = getattr(message, "reasoning_content", None) or None
+
         return CompletionResponse(
             content=content,
             model=model,
@@ -273,6 +315,7 @@ class ProviderManager:
             finish_reason=response.choices[0].finish_reason or "unknown",
             created_at=datetime.now(),
             raw=None,
+            reasoning_content=reasoning_content,
         )
 
     async def _handle_failure(

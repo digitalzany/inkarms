@@ -134,6 +134,7 @@ class MessageProcessor:
         session_id: str | None,
         tokens: int,
         cost: float,
+        model: str | None = None,
     ) -> None:
         """Log an outgoing platform response."""
         content_str = self._content_to_str(response_text)
@@ -146,6 +147,7 @@ class MessageProcessor:
                 session_id=session_id,
                 tokens=tokens,
                 cost=cost,
+                model=model
             )
         else:
             self._audit_logger.log_query(
@@ -153,22 +155,26 @@ class MessageProcessor:
                 platform=platform.value,
                 session_id=session_id,
                 metadata={"type": "response"},
+                model=model
             )
 
     def _track_response(
-        self,
-        session_id: str | None,
-        text: str | list[dict[str, Any]],
-        model: str,
-        cost: float,
-        session_mgr=None,
+            self,
+            session_id: str | None,
+            text: str | list[dict[str, Any]],
+            model: str,
+            cost: float,
+            session_mgr=None,
+            reasoning_content: str | None = None,
     ) -> None:
         """Track assistant response in session manager."""
         mgr = session_mgr or self._session_manager
         if session_id:
             try:
                 content_str = self._content_to_str(text)
-                mgr.add_assistant_message(content_str, model=model, cost=cost)
+                mgr.add_assistant_message(
+                    content_str, model=model, cost=cost, reasoning_content=reasoning_content
+                )
             except Exception as e:
                 logger.error(f"Failed to track response in session: {e}")
 
@@ -286,7 +292,7 @@ class MessageProcessor:
             agent.event_callback = _queue_event
             agent.tool_executor.event_callback = _queue_event
 
-            message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
+            message_dicts = [msg.to_dict() for msg in messages]
 
             agent_task = asyncio.create_task(agent.run(message_dicts, model=model))
 
@@ -332,6 +338,7 @@ class MessageProcessor:
                     session_id,
                     self._session_total_tokens(session_mgr=mgr),
                     summary.total_cost if summary else 0.0,
+                    model=model
                 )
         except Exception as e:
             logger.error(f"Agent loop error: {e}", exc_info=True)
@@ -385,7 +392,7 @@ class MessageProcessor:
         if self._config.agent.enable_tools and self._tool_registry:
             try:
                 agent = self._create_agent(manager)
-                message_dicts = [{"role": msg.role, "content": msg.content} for msg in messages]
+                message_dicts = [msg.to_dict() for msg in messages]
                 result = await agent.run(message_dicts, model=effective_model)
                 summary = manager.get_cost_summary()
 
@@ -403,6 +410,7 @@ class MessageProcessor:
                     session_id,
                     self._session_total_tokens(session_mgr=smgr),
                     summary.total_cost if summary else 0.0,
+                    model=effective_model
                 )
 
                 return ProcessedResponse(
@@ -440,7 +448,12 @@ class MessageProcessor:
                 response.content = notice + response.content
 
             self._track_response(
-                session_id, response.content, response.model, response.cost, session_mgr=smgr
+                session_id,
+                response.content,
+                response.model,
+                response.cost,
+                session_mgr=smgr,
+                reasoning_content=response.reasoning_content,
             )
 
             total_tokens = response.usage.input_tokens + response.usage.output_tokens
@@ -451,6 +464,7 @@ class MessageProcessor:
                 session_id,
                 total_tokens,
                 response.cost,
+                model=response.model
             )
 
             return ProcessedResponse(
@@ -519,6 +533,7 @@ class MessageProcessor:
         # Direct streaming path (no tools)
         try:
             response_text = ""
+            reasoning_content: str | None = None
             stream_response = await manager.complete(
                 messages,
                 model=effective_model,
@@ -528,8 +543,11 @@ class MessageProcessor:
             )
 
             async for chunk in stream_response:  # type: ignore
-                response_text += chunk.content
-                yield StreamChunk(content=chunk.content, is_final=False)
+                if chunk.content:
+                    response_text += chunk.content
+                    yield StreamChunk(content=chunk.content, is_final=False)
+                if chunk.reasoning_content is not None:
+                    reasoning_content = chunk.reasoning_content
 
             yield StreamChunk(content=response_text, is_final=True)
 
@@ -541,6 +559,7 @@ class MessageProcessor:
                         response_text,
                         model=resolved_model,
                         cost=summary.total_cost,
+                        reasoning_content=reasoning_content,
                     )
                 except Exception as e:
                     logger.error(f"Failed to track response in session: {e}")
@@ -553,6 +572,7 @@ class MessageProcessor:
                 session_id,
                 self._session_total_tokens(session_mgr=smgr),
                 summary.total_cost if summary else 0.0,
+                model=effective_model
             )
 
         except AuthenticationError as e:

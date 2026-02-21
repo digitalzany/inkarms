@@ -44,6 +44,9 @@ class AIClient:
         resolved_model = self.provider_manager.resolve_model(model)
         use_streaming = self.stream_callback is not None
 
+        # Normalize provider-required fields (e.g. reasoning_content for reasoning models)
+        messages = self.provider_manager._normalize_reasoning_content(resolved_model, messages)
+
         request_kwargs: dict[str, Any] = {
             "model": resolved_model,
             "messages": messages,
@@ -57,7 +60,10 @@ class AIClient:
 
         if not use_streaming:
             parsed = self.provider_manager.parse_response(response, resolved_model)
-            return {"role": "assistant", "content": parsed.content}
+            result: dict[str, Any] = {"role": "assistant", "content": parsed.content}
+            if parsed.reasoning_content is not None:
+                result["reasoning_content"] = parsed.reasoning_content
+            return result
 
         return await self._handle_streaming_response(response, messages, resolved_model)
 
@@ -85,6 +91,10 @@ class AIClient:
 
         parsed = self.provider_manager.parse_response(full_response, resolved_model)
         content = parsed.content
+        reasoning_content = parsed.reasoning_content
         del full_response, parsed  # Release large objects before returning
 
-        return {"role": "assistant", "content": content}
+        result: dict[str, Any] = {"role": "assistant", "content": content}
+        if reasoning_content is not None:
+            result["reasoning_content"] = reasoning_content
+        return result

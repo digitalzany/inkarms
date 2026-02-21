@@ -26,12 +26,15 @@ class Message:
     content: str | list[dict[str, Any]]  # String or structured content blocks (tool results)
     timestamp: datetime | None = None
     name: str | None = None  # Optional sender name
+    reasoning_content: str | None = None  # LiteLLM standard field for reasoning models
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to LiteLLM-compatible dict."""
         result: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.name:
             result["name"] = self.name
+        if self.reasoning_content is not None:
+            result["reasoning_content"] = self.reasoning_content
         return result
 
     @classmethod
@@ -57,6 +60,7 @@ class StreamChunk:
     content: str
     finish_reason: str | None = None
     model: str | None = None
+    reasoning_content: str | None = None  # Set on the final empty chunk for reasoning models
 
 
 @dataclass
@@ -89,6 +93,9 @@ class CompletionResponse:
 
     # Set when a fallback model was used instead of the requested one
     fallback_from: str | None = None
+
+    # Reasoning content from reasoning-capable models (LiteLLM standard field)
+    reasoning_content: str | None = None
 
     def model_dump(self) -> dict[str, Any]:
         """Convert to dict format (for agent loop compatibility)."""

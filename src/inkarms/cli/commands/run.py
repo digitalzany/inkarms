@@ -286,6 +286,7 @@ async def _run_completion(
         if stream and not json_output:
             # Streaming output
             response_text = ""
+            reasoning_content: str | None = None
             stream_response = await manager.complete(
                 messages,
                 model=model,
@@ -295,8 +296,11 @@ async def _run_completion(
             )
             with Live(console=console, refresh_per_second=10) as live:
                 async for chunk in stream_response:  # type: ignore
-                    response_text += chunk.content
-                    live.update(Markdown(response_text))
+                    if chunk.content:
+                        response_text += chunk.content
+                        live.update(Markdown(response_text))
+                    if chunk.reasoning_content is not None:
+                        reasoning_content = chunk.reasoning_content
 
             summary = manager.get_cost_summary()
 
@@ -306,6 +310,7 @@ async def _run_completion(
                     response_text,
                     model=resolved_model,
                     cost=summary.total_cost,
+                    reasoning_content=reasoning_content,
                 )
 
             # Show cost info
@@ -347,6 +352,7 @@ async def _run_completion(
                     response.content,
                     model=response.model,
                     cost=response.cost,
+                    reasoning_content=response.reasoning_content,
                 )
 
             if json_output:
