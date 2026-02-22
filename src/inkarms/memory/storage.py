@@ -106,6 +106,10 @@ class MemoryStorage:
         """Move a handoff to the archive."""
         return self.handoff_repo.archive(handoff)
 
+    def load_handoff_by_path(self, path: Path) -> HandoffDocument | None:
+        """Load a handoff document from a specific file path."""
+        return self.handoff_repo.load_by_path(path)
+
     def list_handoffs(self, include_archived: bool = False) -> list[MemoryEntry]:
         """List all handoffs."""
         return self.handoff_repo.list_entries(include_archived)

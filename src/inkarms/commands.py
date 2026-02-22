@@ -51,7 +51,7 @@ def cmd_help(_ctx: CommandContext, _arg: str) -> CommandResult:
     return CommandResult(
         message=(
             "Commands: /help /clear /usage /status /save [name] "
-            "/load <name> /history /model [name] /models /tools /agent [mode]"
+            "/load <name> /history /model [name] /models /tools /agent [mode] /compact"
         )
     )
 
@@ -95,6 +95,16 @@ def cmd_status(ctx: CommandContext, _arg: str) -> CommandResult:
         elif usage.should_compact:
             parts.append("Compaction recommended")
     return CommandResult(message=" | ".join(parts))
+
+
+def cmd_compact(_ctx: CommandContext, _arg: str) -> CommandResult:
+    """Compact session context (platform chats only; CLI: inkarms memory compact)."""
+    return CommandResult(
+        message=(
+            "To compact context in a platform chat (Telegram, Slack, Discord), type /compact there. "
+            "In the CLI, run: inkarms memory compact"
+        )
+    )
 
 
 def cmd_save(ctx: CommandContext, arg: str) -> CommandResult:
@@ -340,6 +350,7 @@ class CommandRegistry:
         "/models": ("Show all providers and models", cmd_models),
         "/tools": ("Show registered tools", cmd_tools),
         "/agent": ("Show/change agent settings", cmd_agent),
+        "/compact": ("Compact session context to reduce token usage", cmd_compact),
     }
 
     @staticmethod

@@ -4,8 +4,6 @@ inkarms status - Status and health monitoring commands.
 Usage:
     inkarms status
     inkarms status health
-    inkarms status tokens
-    inkarms status cost
 """
 
 import asyncio
@@ -29,28 +27,6 @@ console = Console()
 @app.callback(invoke_without_command=True)
 def status_overview(
     ctx: typer.Context,
-    watch: Annotated[
-        bool,
-        typer.Option(
-            "--watch",
-            "-w",
-            help="Watch mode with live updates.",
-        ),
-    ] = False,
-    interval: Annotated[
-        int,
-        typer.Option(
-            "--interval",
-            help="Update interval in seconds (for watch mode).",
-        ),
-    ] = 5,
-    json_output: Annotated[
-        bool,
-        typer.Option(
-            "--json",
-            help="Output as JSON.",
-        ),
-    ] = False,
 ) -> None:
     """Show overall status."""
     if ctx.invoked_subcommand is None:
@@ -146,131 +122,3 @@ async def _health_check(provider: str | None, all_providers: bool) -> None:
     except Exception as e:
         console.print(f"[red]Health check failed: {e}[/red]")
         raise typer.Exit(1)
-
-
-@app.command()
-def tokens(
-    today: Annotated[
-        bool,
-        typer.Option(
-            "--today",
-            help="Show today's usage only.",
-        ),
-    ] = False,
-    by_model: Annotated[
-        bool,
-        typer.Option(
-            "--by-model",
-            help="Group by model.",
-        ),
-    ] = False,
-) -> None:
-    """Show token usage statistics."""
-    # Show session usage from current provider manager
-    try:
-        from inkarms.providers import get_provider_manager
-
-        manager = get_provider_manager()
-        summary = manager.get_cost_summary()
-
-        if not summary.by_model:
-            console.print("[dim]No token usage in current session.[/dim]")
-            console.print("[dim]Run some queries first with 'inkarms run'.[/dim]")
-            return
-
-        table = Table(title="Session Token Usage")
-        table.add_column("Model", style="cyan")
-        table.add_column("Input Tokens", justify="right")
-        table.add_column("Output Tokens", justify="right")
-        table.add_column("Requests", justify="right")
-        table.add_column("Cost", justify="right", style="green")
-
-        for model, usage in summary.by_model.items():
-            table.add_row(
-                model,
-                f"{usage.input_tokens:,}",
-                f"{usage.output_tokens:,}",
-                str(usage.request_count),
-                f"${usage.total_cost:.4f}",
-            )
-
-        # Total row
-        table.add_row(
-            "[bold]Total[/bold]",
-            f"[bold]{summary.total_input_tokens:,}[/bold]",
-            f"[bold]{summary.total_output_tokens:,}[/bold]",
-            "[bold]-[/bold]",
-            f"[bold]${summary.total_cost:.4f}[/bold]",
-        )
-
-        console.print(table)
-
-        if today:
-            console.print(
-                "\n[yellow]Note: Historical usage tracking not yet implemented. "
-                "Showing session only.[/yellow]"
-            )
-
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        console.print(
-            "[yellow]Token stats persistence not yet implemented. "
-            "Coming in Phase 1, Milestone 1.5.[/yellow]"
-        )
-
-
-@app.command()
-def cost(
-    month: Annotated[
-        bool,
-        typer.Option(
-            "--month",
-            help="Show monthly cost.",
-        ),
-    ] = False,
-    by_model: Annotated[
-        bool,
-        typer.Option(
-            "--by-model",
-            help="Group by model.",
-        ),
-    ] = False,
-) -> None:
-    """Show cost tracking information."""
-    # For now, just show session costs
-    try:
-        from inkarms.providers import get_provider_manager
-
-        manager = get_provider_manager()
-        summary = manager.get_cost_summary()
-
-        console.print("[bold]Session Cost Summary[/bold]\n")
-        console.print(f"  Total cost: [green]${summary.total_cost:.4f}[/green]")
-        console.print(
-            f"  Total tokens: {summary.total_input_tokens + summary.total_output_tokens:,}"
-        )
-
-        if by_model and summary.by_model:
-            console.print("\n[bold]By Model:[/bold]")
-            for model, usage in summary.by_model.items():
-                console.print(f"  {model}: ${usage.total_cost:.4f}")
-
-        if month:
-            console.print(
-                "\n[yellow]Note: Monthly cost tracking not yet implemented. "
-                "Showing session only.[/yellow]"
-            )
-
-    except Exception as e:
-        console.print(f"[red]Error: {e}[/red]")
-        console.print(
-            "[yellow]Cost tracking persistence not yet implemented. Coming in Phase 1.[/yellow]"
-        )
-
-
-@app.command()
-def context() -> None:
-    """Show current context window usage."""
-    console.print(
-        "[yellow]Context status not yet implemented. Coming in Phase 1, Milestone 1.5.[/yellow]"
-    )

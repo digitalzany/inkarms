@@ -267,22 +267,6 @@ def remove(
 
 
 @app.command()
-def update(
-    name: Annotated[
-        str | None,
-        typer.Argument(
-            help="Skill name (updates all if not specified).",
-        ),
-    ] = None,
-) -> None:
-    """Update skill(s) to latest version."""
-    console.print(
-        "[yellow]Skill update not yet implemented. "
-        "Remote skill installation coming in a future release.[/yellow]"
-    )
-
-
-@app.command()
 def create(
     name: Annotated[
         str,

@@ -9,10 +9,8 @@ These options work with any command:
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--version` | `-V` | Show version and exit |
-| `--verbose` | `-v` | Enable verbose output |
-| `--quiet` | `-q` | Minimal output |
 | `--profile` | `-p` | Use specific config profile |
-| `--ui` | | UI backend selection (auto, rich, textual) |
+| `--ui` | | UI backend selection (auto, rich) |
 | `--no-color` | | Disable colored output |
 | `--help` | `-h` | Show help message |
 
@@ -27,9 +25,8 @@ inkarms              # Launch interactive UI (default, no subcommand)
 ├── tools            # Tool management
 ├── memory           # Memory and context
 ├── status           # Health and monitoring
-├── audit            # Audit logs
-├── profile          # Profile management
-└── platforms        # Platform messaging
+├── platforms        # Platform messaging
+└── hub              # Hub daemon management
 ```
 
 ---
@@ -53,9 +50,8 @@ inkarms run [OPTIONS] [QUERY]
 | Option | Short | Type | Default | Description |
 |--------|-------|------|---------|-------------|
 | `--model` | `-m` | TEXT | config | Model to use (name or alias) |
-| `--task` | `-t` | TEXT | auto | Task type (planned) |
-| `--skill` | `-s` | TEXT | | Explicitly load a skill by name |
-| `--deep` | `-d` | FLAG | false | Enable deep thinking chain (planned) |
+| `--skill` | `-s` | TEXT | | Explicitly load a skill by name or path |
+| `--auto-skill/--no-auto-skill` | | FLAG | false | Auto-discover relevant skills based on query |
 | `--approve` | `-a` | FLAG | false | Require approval for commands |
 | `--stream/--no-stream` | | FLAG | stream | Stream response |
 | `--yes` | `-y` | FLAG | false | Skip confirmations |
@@ -82,6 +78,9 @@ inkarms run --model openai/gpt-4 "Write a haiku"
 
 # Enable tools and auto-approve
 inkarms run "Check git status" --tools --tool-approval auto
+
+# Auto-discover relevant skills
+inkarms run "Review this code for security issues" --auto-skill
 
 # Include context file
 inkarms run --context ./main.py "Explain this code"
@@ -112,8 +111,6 @@ inkarms run rerun [OPTIONS]
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--model` | `-m` | Override model |
-| `--task` | `-t` | Override task type |
-| `--deep` | `-d` | Enable deep thinking |
 
 ---
 
@@ -218,6 +215,18 @@ List configured secrets.
 inkarms config list-secrets
 ```
 
+### inkarms config delete-secret
+
+Delete a stored secret.
+
+```bash
+inkarms config delete-secret PROVIDER [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--yes` | `-y` | Skip confirmation |
+
 ### inkarms config validate
 
 Validate configuration.
@@ -241,8 +250,9 @@ inkarms config init [OPTIONS]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--quick` | `-q` | CLI inline wizard (instead of interactive UI) |
-| `--force` | `-f` | Force overwrite (only valid with `--quick`) |
+| `--project` | | Initialize project config in current directory |
+| `--profile` | `-p` | Profile name to initialize |
+| `--force` | `-f` | Force overwrite existing config |
 
 #### Wizard Modes
 
@@ -252,7 +262,7 @@ Opens a terminal wizard with two options:
 - **Advanced** (10-15 minutes) - Full 8-section configuration
 
 **CLI Mode (`--quick`):**
-Inline command-line prompts using questionary.
+Inline command-line prompts.
 
 #### Examples
 
@@ -260,11 +270,11 @@ Inline command-line prompts using questionary.
 # Open interactive wizard (recommended)
 inkarms config init
 
-# CLI inline wizard
-inkarms config init --quick
+# Initialize project config in current directory
+inkarms config init --project
 
-# CLI wizard with force overwrite (for automation)
-inkarms config init --quick --force
+# Force reinitialize
+inkarms config init --force
 ```
 
 #### What Gets Created
@@ -299,7 +309,7 @@ inkarms skill list [OPTIONS]
 
 ### inkarms skill search
 
-Search for skills.
+Search for skills by keyword.
 
 ```bash
 inkarms skill search QUERY [OPTIONS]
@@ -323,7 +333,7 @@ inkarms skill show NAME
 
 ### inkarms skill install
 
-Install a skill from a local path.
+Install a skill from a local directory.
 
 ```bash
 inkarms skill install SOURCE [OPTIONS]
@@ -331,16 +341,14 @@ inkarms skill install SOURCE [OPTIONS]
 
 | Argument | Description |
 |----------|-------------|
-| `SOURCE` | Skill source (local path) |
+| `SOURCE` | Path to skill directory |
 
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--force` | `-f` | Overwrite existing |
 
-#### Source Formats
-
 ```bash
-# From local path
+# Install from local path
 inkarms skill install ./my-skill
 inkarms skill install /absolute/path/to/skill
 ```
@@ -357,18 +365,6 @@ inkarms skill remove NAME [OPTIONS]
 |--------|-------|-------------|
 | `--yes` | `-y` | Skip confirmation |
 
-### inkarms skill update
-
-Update skill(s).
-
-```bash
-inkarms skill update [NAME]
-```
-
-| Argument | Description |
-|----------|-------------|
-| `NAME` | Skill name (updates all if omitted) |
-
 ### inkarms skill create
 
 Create a new skill from template.
@@ -377,13 +373,14 @@ Create a new skill from template.
 inkarms skill create NAME [OPTIONS]
 ```
 
-| Option | Description |
-|--------|-------------|
-| `--template` | Template to use |
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--description` | `-d` | Skill description |
+| `--location` | `-l` | global or project (default: global) |
 
 ### inkarms skill validate
 
-Validate a skill.
+Validate a skill directory.
 
 ```bash
 inkarms skill validate PATH
@@ -418,6 +415,7 @@ inkarms memory list [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--type` | Filter: daily, handoff, snapshot |
+| `--limit` | Maximum results |
 
 ### inkarms memory show
 
@@ -429,7 +427,7 @@ inkarms memory show NAME
 
 | Argument | Description |
 |----------|-------------|
-| `NAME` | Memory name or date |
+| `NAME` | Memory name or date (e.g., `2026-02-02`, `my-snapshot`) |
 
 ### inkarms memory snapshot
 
@@ -441,7 +439,8 @@ inkarms memory snapshot NAME [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--topic` | Topic description |
+| `--description` | Snapshot description |
+| `--topic` | Topic tag |
 
 ### inkarms memory compact
 
@@ -454,11 +453,12 @@ inkarms memory compact [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `--strategy` | summarize, truncate, sliding_window |
-| `--keep-recent` | Turns to preserve |
+| `--keep-recent` | Number of recent turns to preserve |
+| `--dry-run` | Show what would happen without doing it |
 
 ### inkarms memory clean
 
-Clean non-essential messages.
+Remove non-essential messages from context.
 
 ```bash
 inkarms memory clean
@@ -466,7 +466,7 @@ inkarms memory clean
 
 ### inkarms memory handoff
 
-Create or check handoff document.
+Create or check a handoff document.
 
 ```bash
 inkarms memory handoff [OPTIONS]
@@ -474,12 +474,12 @@ inkarms memory handoff [OPTIONS]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--force` | `-f` | Force creation |
-| `--check` | | Check without creating |
+| `--force` | `-f` | Force creation even if below threshold |
+| `--check` | | Check if handoff is needed without creating |
 
 ### inkarms memory recover
 
-Recover from handoff.
+Recover session from handoff document.
 
 ```bash
 inkarms memory recover [OPTIONS]
@@ -487,7 +487,7 @@ inkarms memory recover [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--no-archive` | Don't archive handoff |
+| `--no-archive` | Don't archive the handoff file after recovery |
 
 ### inkarms memory delete
 
@@ -497,9 +497,29 @@ Delete memory files.
 inkarms memory delete NAME [OPTIONS]
 ```
 
-| Option | Description |
-|--------|-------------|
-| `--older-than` | Duration (e.g., '30d') |
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--yes` | `-y` | Skip confirmation |
+
+### inkarms memory status
+
+Show current session status.
+
+```bash
+inkarms memory status
+```
+
+### inkarms memory clear
+
+Clear the current session.
+
+```bash
+inkarms memory clear [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--yes` | `-y` | Skip confirmation |
 
 ---
 
@@ -510,14 +530,6 @@ Status and health monitoring.
 ```bash
 inkarms status [COMMAND] [OPTIONS]
 ```
-
-### Options (status overview)
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--watch` | `-w` | Live updates |
-| `--interval` | | Update interval (seconds) |
-| `--json` | | Output as JSON |
 
 ### inkarms status health
 
@@ -531,112 +543,59 @@ inkarms status health [PROVIDER] [OPTIONS]
 |--------|-------------|
 | `--all` | Check all providers |
 
-### inkarms status tokens
-
-Show token usage.
-
-```bash
-inkarms status tokens [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--today` | Today only |
-| `--by-model` | Group by model |
-
-### inkarms status cost
-
-Show cost tracking.
-
-```bash
-inkarms status cost [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--month` | Monthly cost |
-| `--by-model` | Group by model |
-
-### inkarms status context
-
-Show context window usage.
-
-```bash
-inkarms status context
-```
-
 ---
 
-## inkarms audit
+## inkarms tools
 
-Audit log access.
+Tool management and testing.
 
 ```bash
-inkarms audit [COMMAND]
+inkarms tools [COMMAND]
 ```
 
-### inkarms audit tail
+### inkarms tools list
 
-View recent events.
-
-```bash
-inkarms audit tail [OPTIONS]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--lines` | `-n` | Number of lines |
-
-### inkarms audit search
-
-Search audit events.
+List all available tools.
 
 ```bash
-inkarms audit search [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--type` | Event type |
-| `--since` | Start time (e.g., '24h', '7d') |
-| `--until` | End time |
-| `--severity` | Minimum severity |
-| `--session` | Session ID |
-| `--contains` | Text search |
-
-### inkarms audit stats
-
-Show statistics.
-
-```bash
-inkarms audit stats METRIC [OPTIONS]
-```
-
-| Argument | Description |
-|----------|-------------|
-| `METRIC` | tokens, cost, requests |
-
-| Option | Description |
-|--------|-------------|
-| `--today` | Today only |
-| `--week` | Last 7 days |
-| `--month` | Last 30 days |
-
-### inkarms audit export
-
-Export audit log.
-
-```bash
-inkarms audit export [OPTIONS]
+inkarms tools list [OPTIONS]
 ```
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--format` | `-f` | json, jsonl, csv, markdown |
-| `--output` | `-o` | Output file |
-| `--since` | | Start time |
-| `--type` | | Event type filter |
-| `--session` | | Session filter |
+| `--all` | `-a` | Include tools with missing optional dependencies |
+
+### inkarms tools info
+
+Show detailed tool information.
+
+```bash
+inkarms tools info TOOL_NAME
+```
+
+### inkarms tools test
+
+Test a tool with given parameters.
+
+```bash
+inkarms tools test TOOL_NAME [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--params` | `-p` | Parameters as JSON string |
+
+### inkarms tools metrics
+
+Show tool usage statistics.
+
+```bash
+inkarms tools metrics [TOOL_NAME] [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--clear` | Reset metrics |
 
 ---
 
@@ -666,19 +625,7 @@ inkarms platforms start [OPTIONS]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--platform` | `-p` | Start specific platform (e.g., telegram) |
-
-### inkarms platforms stop
-
-Stop platform message service (placeholder for future daemon support).
-
-```bash
-inkarms platforms stop [OPTIONS]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--platform` | `-p` | Stop specific platform |
+| `--platform` | `-p` | Start specific platform (telegram, slack, discord) |
 
 ### inkarms platforms status
 
@@ -690,73 +637,100 @@ inkarms platforms status
 
 ---
 
-## inkarms profile
+## inkarms hub
 
-Profile management.
+InkArms Hub daemon management.
 
 ```bash
-inkarms profile [COMMAND]
+inkarms hub [COMMAND]
 ```
 
-### inkarms profile list
+### inkarms hub start
 
-List all profiles.
-
-```bash
-inkarms profile list
-```
-
-### inkarms profile show
-
-Show profile details.
+Start the Hub daemon.
 
 ```bash
-inkarms profile show NAME
-```
-
-### inkarms profile create
-
-Create a new profile.
-
-```bash
-inkarms profile create NAME [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--from` | Copy from existing profile |
-
-### inkarms profile use
-
-Switch to a profile.
-
-```bash
-inkarms profile use NAME [OPTIONS]
-```
-
-| Option | Description |
-|--------|-------------|
-| `--default` | Set as default |
-
-### inkarms profile edit
-
-Edit a profile.
-
-```bash
-inkarms profile edit NAME
-```
-
-### inkarms profile delete
-
-Delete a profile.
-
-```bash
-inkarms profile delete NAME [OPTIONS]
+inkarms hub start [OPTIONS]
 ```
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--yes` | `-y` | Skip confirmation |
+| `--background` | `-b` | Run as background daemon |
+
+### inkarms hub stop
+
+Gracefully stop the Hub daemon.
+
+```bash
+inkarms hub stop
+```
+
+### inkarms hub restart
+
+Stop and restart the Hub daemon.
+
+```bash
+inkarms hub restart
+```
+
+### inkarms hub status
+
+Show Hub status (uptime, model, today's cost).
+
+```bash
+inkarms hub status
+```
+
+### inkarms hub logs
+
+View Hub log output.
+
+```bash
+inkarms hub logs [OPTIONS]
+```
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--lines` | `-n` | Number of lines to show (default: 50) |
+| `--follow` | `-f` | Follow log output (like `tail -f`) |
+
+### inkarms hub install
+
+Install Hub as a system service (auto-start at login).
+
+```bash
+inkarms hub install
+```
+
+Installs as launchd plist on macOS or systemd user service on Linux.
+
+### inkarms hub uninstall
+
+Remove the Hub system service.
+
+```bash
+inkarms hub uninstall
+```
+
+### inkarms hub key
+
+Show or rotate the Hub API key.
+
+```bash
+inkarms hub key [OPTIONS]
+```
+
+| Option | Description |
+|--------|-------------|
+| `--rotate` | Generate and store a new API key |
+
+### inkarms hub dev
+
+Start Hub in development mode with auto-reload.
+
+```bash
+inkarms hub dev
+```
 
 ---
 
@@ -772,7 +746,7 @@ inkarms [OPTIONS]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--ui` | | UI backend: auto, rich, textual (default: auto) |
+| `--ui` | | UI backend: auto, rich (default: auto) |
 | `--profile` | `-p` | Use specific config profile |
 
 ### Examples
@@ -781,9 +755,8 @@ inkarms [OPTIONS]
 # Launch UI with default settings
 inkarms
 
-# Launch with specific backend
+# Launch with explicit Rich backend
 inkarms --ui rich
-inkarms --ui textual
 ```
 
 ### Features
@@ -812,7 +785,7 @@ inkarms ui [OPTIONS]
 
 | Option | Short | Description |
 |--------|-------|-------------|
-| `--backend` | `-b` | UI backend: auto, rich, textual (default: auto) |
+| `--backend` | `-b` | UI backend: auto, rich (default: auto) |
 
 ### Examples
 
@@ -820,9 +793,8 @@ inkarms ui [OPTIONS]
 # Launch with default backend (Rich)
 inkarms ui
 
-# Launch with specific backend
+# Launch with Rich backend explicitly
 inkarms ui --backend rich
-inkarms ui --backend textual
 ```
 
 ---
@@ -850,9 +822,6 @@ inkarms ui --backend textual
 inkarms --install-completion bash
 inkarms --install-completion zsh
 inkarms --install-completion fish
-
-# Or show completion script
-inkarms --show-completion bash > inkarms-completion.bash
 ```
 
 ---

@@ -80,7 +80,8 @@ class CostTracker:
                 total_estimated=0.0,
             )
 
-    def _calculate_input_cost(self, model: str, input_tokens: int) -> float:
+    @staticmethod
+    def _calculate_input_cost(model: str, input_tokens: int) -> float:
         """Calculate input token cost."""
         try:
             from litellm import completion_cost
@@ -94,7 +95,8 @@ class CostTracker:
         except Exception:
             return 0.0
 
-    def _calculate_output_cost(self, model: str, output_tokens: int) -> float:
+    @staticmethod
+    def _calculate_output_cost(model: str, output_tokens: int) -> float:
         """Calculate output token cost."""
         try:
             from litellm import completion_cost
@@ -132,7 +134,8 @@ class CostTracker:
             f"{usage.input_tokens} in, {usage.output_tokens} out, ${cost:.6f}"
         )
 
-    def calculate_response_cost(self, response: Any, model: str) -> float:
+    @staticmethod
+    def calculate_response_cost(response: Any, model: str) -> float:
         """
         Calculate cost from a LiteLLM response.
 

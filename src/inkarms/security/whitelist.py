@@ -1,10 +1,3 @@
-"""
-Command whitelist/blacklist filtering for InkArms sandbox.
-
-This module provides command validation against configurable
-whitelist and blacklist patterns using category-aware matching.
-"""
-
 from __future__ import annotations
 
 import re

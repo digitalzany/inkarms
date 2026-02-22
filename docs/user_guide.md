@@ -180,16 +180,6 @@ inkarms run --dry-run "Test query"
 inkarms run --temperature 0.9 "Be creative!"
 ```
 
-### Coming Soon
-
-```bash
-# Use a specific task type (not yet implemented)
-inkarms run "Review this code for bugs" --task coding
-
-# Enable deep thinking for complex tasks (not yet implemented)
-inkarms run "Design a microservices architecture" --deep
-```
-
 ### Output Options
 
 ```bash
@@ -219,9 +209,8 @@ inkarms              # Launch interactive UI (default, no subcommand)
 ├── tools            # Tool management
 ├── memory           # Memory and context
 ├── status           # Health and monitoring
-├── audit            # Audit logs
-├── profile          # Profile management
-└── platforms        # Platform messaging (Telegram, Slack, Discord)
+├── platforms        # Platform messaging (Telegram, Slack, Discord)
+└── hub              # Hub daemon management
 ```
 
 ### Global Options
@@ -231,10 +220,8 @@ These work with any command:
 | Option | Short | Description |
 |--------|-------|-------------|
 | `--version` | `-V` | Show version |
-| `--verbose` | `-v` | Verbose output |
-| `--quiet` | `-q` | Minimal output |
 | `--profile` | `-p` | Use specific profile |
-| `--ui` | | UI backend (auto, rich, textual) |
+| `--ui` | | UI backend (auto, rich) |
 | `--no-color` | | Disable colors |
 | `--help` | `-h` | Show help |
 
@@ -264,26 +251,22 @@ inkarms skill list --verbose  # More details
 ### Installing Skills
 
 ```bash
-# From GitHub
-inkarms skill install github:user/repo/skill-name
-
-# From a URL
-inkarms skill install https://github.com/user/skills-repo
-
 # From a local directory
 inkarms skill install ./my-local-skill
+inkarms skill install /absolute/path/to/skill
 ```
+
+> Remote skill installation (GitHub, URLs) is planned for a future release. For now, skills live on the local filesystem.
 
 ### Using Skills
 
 ```bash
-# Explicitly load a skill
+# Explicitly load a skill by name
 inkarms run "Scan for vulnerabilities" --skill security-scan
 
-# Skills are also auto-loaded based on your query!
-# InkArms uses a smart index to find relevant skills
-inkarms run "Check this Python code for security issues"
-# ^ This might auto-load a security skill based on keywords
+# Auto-discover skills based on your query (keyword index)
+inkarms run "Check this Python code for security issues" --auto-skill
+# ^ InkArms searches the skill index and injects matching skill instructions
 ```
 
 ### Creating Skills
@@ -556,12 +539,12 @@ Add these to your `.bashrc` or `.zshrc`:
 
 ```bash
 alias ia="inkarms run"
-alias iad="inkarms run --deep"
-alias ias="inkarms status"
+alias iat="inkarms run --tools"       # Run with tools enabled
+alias ias="inkarms memory status"     # Check context usage
 
-# Quick coding help
-function iacode() {
-    inkarms run "$1" --task coding --model claude-opus
+# Run with tools auto-approved and a specific model
+function iafast() {
+    inkarms run "$1" --tools --tool-approval auto --model fast
 }
 ```
 
@@ -580,20 +563,33 @@ inkarms run "Generate unit tests" > tests.py
 
 ### Using Profiles
 
-Create profiles for different contexts:
+Profiles are partial YAML files that override your global config. Create them manually:
 
 ```bash
-# Create a development profile
-inkarms profile create dev
+# Create a profile file
+mkdir -p ~/.inkarms/profiles
+cat > ~/.inkarms/profiles/dev.yaml << 'EOF'
+_meta:
+  name: "dev"
+  description: "Local model, verbose output"
 
-# Edit it
-inkarms profile edit dev
+providers:
+  default: "ollama/llama3.1"
 
-# Switch to it
-inkarms profile use dev
+security:
+  sandbox:
+    mode: "prompt"
 
-# Use temporarily
+general:
+  output:
+    verbose: true
+EOF
+
+# Use temporarily for a single command
 inkarms run "Query" --profile dev
+
+# Set as the default profile
+inkarms config set general.default_profile dev
 ```
 
 ### Project-Specific Config
@@ -647,8 +643,8 @@ inkarms memory handoff
 # Check provider health
 inkarms status health
 
-# View recent audit logs
-inkarms audit tail
+# View recent audit log entries
+tail -n 50 ~/.inkarms/audit/audit.jsonl | jq .
 
 # Join our Discord for community support
 # https://discord.gg/inkarms

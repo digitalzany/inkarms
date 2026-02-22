@@ -6,6 +6,7 @@ This module bridges platform adapters to the core InkArms components
 
 import asyncio
 import contextlib
+import dataclasses
 import json
 import logging
 import re
@@ -18,15 +19,17 @@ from pydantic import BaseModel
 from inkarms.agent import AgentConfig, AgentEvent, AgentLoop, ApprovalMode, EventType
 from inkarms.audit import get_audit_logger
 from inkarms.config import get_config
-from inkarms.memory import get_session_manager
-from inkarms.models.platforms import PlatformType, StreamChunk
+from inkarms.memory import SessionManager, get_session_manager
+from inkarms.models.platforms import PlatformStreamChunk, PlatformType
 from inkarms.platforms.context import ContextBuilder
 from inkarms.platforms.sessions import PlatformSessionStore
 from inkarms.providers import (
     AllProvidersFailedError,
     AuthenticationError,
     CompletionResponse,
+    Message,
     ProviderError,
+    ProviderManager,
     get_provider_manager,
 )
 from inkarms.security.sandbox import SandboxExecutor
@@ -50,6 +53,15 @@ class ProcessedResponse(BaseModel):
     error: str | None = None
     tools_used: int = 0
     iterations: int = 1
+
+
+@dataclasses.dataclass
+class _RequestSetup:
+    """Common setup data shared between process() and process_streaming()."""
+
+    smgr: SessionManager
+    messages: list[Message]
+    effective_model: str | None
 
 
 class MessageProcessor:
@@ -87,7 +99,7 @@ class MessageProcessor:
             sandbox = SandboxExecutor.from_config(self._config.security)
             register_builtin_tools(self._tool_registry, sandbox)
 
-    def _resolve_session_manager(self, session_id: str | None):
+    def _resolve_session_manager(self, session_id: str | None) -> SessionManager:
         """Get the appropriate SessionManager for this request."""
         if self._session_store and session_id:
             return self._session_store.get_manager(session_id, model=self._config.providers.default)
@@ -105,6 +117,29 @@ class MessageProcessor:
             finish_reason="error",
             error=error_msg,
         )
+
+    async def _setup_request(
+        self,
+        query: str,
+        session_id: str | None,
+        platform: PlatformType,
+        platform_user_id: str | None,
+        platform_username: str | None,
+        model: str | None,
+        skill_names: list[str] | None,
+        auto_skills: bool,
+    ) -> _RequestSetup:
+        """Perform common request setup shared by process() and process_streaming()."""
+        self._log_incoming(query, platform, platform_user_id, platform_username, session_id)
+        smgr = self._resolve_session_manager(session_id)
+        skills = await self._load_skills(query, skill_names, auto_skills)
+        messages = self._context_builder.build_messages(
+            query, skills, session_id, session_manager=smgr
+        )
+        if model:
+            smgr.set_model(model)
+        effective_model = model or smgr.model or None
+        return _RequestSetup(smgr=smgr, messages=messages, effective_model=effective_model)
 
     def _log_incoming(
         self,
@@ -164,7 +199,7 @@ class MessageProcessor:
             text: str | list[dict[str, Any]],
             model: str,
             cost: float,
-            session_mgr=None,
+            session_mgr: SessionManager | None = None,
             reasoning_content: str | None = None,
     ) -> None:
         """Track assistant response in session manager."""
@@ -214,7 +249,7 @@ class MessageProcessor:
 
     def _create_agent(
         self,
-        manager,
+        manager: ProviderManager,
         stream_callback: Callable[[str], None] | None = None,
     ) -> AgentLoop:
         """Create an AgentLoop with current config."""
@@ -238,10 +273,10 @@ class MessageProcessor:
         )
 
     @staticmethod
-    def _event_to_stream_chunk(event: AgentEvent) -> StreamChunk | None:
+    def _event_to_stream_chunk(event: AgentEvent) -> PlatformStreamChunk | None:
         """Convert an agent event to a progress stream chunk."""
         if event.event_type == EventType.STREAM_CHUNK:
-            return StreamChunk(content=event.message or "", is_final=False)
+            return PlatformStreamChunk(content=event.message or "", is_final=False)
 
         formatters = {
             EventType.TOOL_START: lambda e: f"Running tool: {e.tool_name}...",
@@ -251,7 +286,7 @@ class MessageProcessor:
         formatter = formatters.get(event.event_type)
         if not formatter:
             return None
-        return StreamChunk(
+        return PlatformStreamChunk(
             content=formatter(event),
             is_final=False,
             metadata={"event_type": event.event_type, "tool_name": event.tool_name},
@@ -259,14 +294,14 @@ class MessageProcessor:
 
     async def _stream_agent_loop(
         self,
-        manager,
-        messages,
-        model,
-        session_id,
-        platform,
-        platform_user_id,
-        session_mgr=None,
-    ) -> AsyncIterator[StreamChunk]:
+        manager: ProviderManager,
+        messages: list[Message],
+        model: str | None,
+        session_id: str | None,
+        platform: PlatformType,
+        platform_user_id: str | None,
+        session_mgr: SessionManager | None = None,
+    ) -> AsyncIterator[PlatformStreamChunk]:
         """Run agent loop and yield progress chunks as events arrive."""
         mgr = session_mgr or self._session_manager
         agent_task: asyncio.Task | None = None
@@ -316,12 +351,12 @@ class MessageProcessor:
 
             result = agent_task.result()
             if result.error:
-                yield StreamChunk(
+                yield PlatformStreamChunk(
                     content=f"Error: {self._format_provider_error(result.error)}",
                     is_final=True,
                 )
             else:
-                yield StreamChunk(content=result.final_response, is_final=True)
+                yield PlatformStreamChunk(content=result.final_response, is_final=True)
 
                 summary = manager.get_cost_summary()
                 self._track_response(
@@ -342,7 +377,7 @@ class MessageProcessor:
                 )
         except Exception as e:
             logger.error(f"Agent loop error: {e}", exc_info=True)
-            yield StreamChunk(content=f"Error: Agent loop error: {e}", is_final=True)
+            yield PlatformStreamChunk(content=f"Error: Agent loop error: {e}", is_final=True)
         finally:
             # Always cancel the agent task to prevent orphaned background loops
             # that keep making LLM calls and accumulating conversation data
@@ -351,7 +386,7 @@ class MessageProcessor:
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await agent_task
 
-    def _session_total_tokens(self, session_mgr=None) -> int:
+    def _session_total_tokens(self, session_mgr: SessionManager | None = None) -> int:
         """Get total tokens from session metadata, or 0."""
         mgr = session_mgr or self._session_manager
         meta = mgr.session.metadata
@@ -371,16 +406,11 @@ class MessageProcessor:
         max_tokens: int | None = None,
     ) -> ProcessedResponse:
         """Process a message and return non-streaming response."""
-        self._log_incoming(query, platform, platform_user_id, platform_username, session_id)
-
-        smgr = self._resolve_session_manager(session_id)
-        skills = await self._load_skills(query, skill_names, auto_skills)
-        messages = self._context_builder.build_messages(
-            query, skills, session_id, session_manager=smgr
+        setup = await self._setup_request(
+            query, session_id, platform, platform_user_id, platform_username,
+            model, skill_names, auto_skills,
         )
-        if model:
-            smgr.set_model(model)
-        effective_model = model or smgr.model or None
+        smgr, messages, effective_model = setup.smgr, setup.messages, setup.effective_model
 
         try:
             manager = get_provider_manager()
@@ -412,6 +442,10 @@ class MessageProcessor:
                     summary.total_cost if summary else 0.0,
                     model=effective_model
                 )
+
+                if session_id and smgr.should_compact():
+                    logger.info("Context at threshold, auto-compacting session")
+                    await smgr.compact()
 
                 return ProcessedResponse(
                     content=result.final_response,
@@ -467,6 +501,10 @@ class MessageProcessor:
                 model=response.model
             )
 
+            if session_id and smgr.should_compact():
+                logger.info("Context at threshold, auto-compacting session")
+                await smgr.compact()
+
             return ProcessedResponse(
                 content=self._content_to_str(response.content),
                 model=response.model,
@@ -496,24 +534,19 @@ class MessageProcessor:
         auto_skills: bool = False,
         temperature: float = 0.7,
         max_tokens: int | None = None,
-    ) -> AsyncIterator[StreamChunk]:
+    ) -> AsyncIterator[PlatformStreamChunk]:
         """Process a message and return streaming response."""
-        self._log_incoming(query, platform, platform_user_id, platform_username, session_id)
-
-        smgr = self._resolve_session_manager(session_id)
-        skills = await self._load_skills(query, skill_names, auto_skills)
-        messages = self._context_builder.build_messages(
-            query, skills, session_id, session_manager=smgr
+        setup = await self._setup_request(
+            query, session_id, platform, platform_user_id, platform_username,
+            model, skill_names, auto_skills,
         )
-        if model:
-            smgr.set_model(model)
-        effective_model = model or smgr.model or None
+        smgr, messages, effective_model = setup.smgr, setup.messages, setup.effective_model
 
         try:
             manager = get_provider_manager()
         except Exception as e:
             logger.error(f"Failed to initialize provider: {e}")
-            yield StreamChunk(content=f"Error: Failed to initialize provider: {e}", is_final=True)
+            yield PlatformStreamChunk(content=f"Error: Failed to initialize provider: {e}", is_final=True)
             return
 
         # Agent loop path (tools enabled)
@@ -528,6 +561,9 @@ class MessageProcessor:
                 session_mgr=smgr,
             ):
                 yield chunk
+            if session_id and smgr.should_compact():
+                logger.info("Context at threshold, auto-compacting session")
+                await smgr.compact()
             return
 
         # Direct streaming path (no tools)
@@ -545,11 +581,11 @@ class MessageProcessor:
             async for chunk in stream_response:  # type: ignore
                 if chunk.content:
                     response_text += chunk.content
-                    yield StreamChunk(content=chunk.content, is_final=False)
+                    yield PlatformStreamChunk(content=chunk.content, is_final=False)
                 if chunk.reasoning_content is not None:
                     reasoning_content = chunk.reasoning_content
 
-            yield StreamChunk(content=response_text, is_final=True)
+            yield PlatformStreamChunk(content=response_text, is_final=True)
 
             if session_id:
                 try:
@@ -561,6 +597,9 @@ class MessageProcessor:
                         cost=summary.total_cost,
                         reasoning_content=reasoning_content,
                     )
+                    if smgr.should_compact():
+                        logger.info("Context at threshold, auto-compacting session")
+                        await smgr.compact()
                 except Exception as e:
                     logger.error(f"Failed to track response in session: {e}")
 
@@ -577,15 +616,15 @@ class MessageProcessor:
 
         except AuthenticationError as e:
             logger.error(f"Authentication failed: {e}")
-            yield StreamChunk(content=f"Error: Authentication failed: {e}", is_final=True)
+            yield PlatformStreamChunk(content=f"Error: Authentication failed: {e}", is_final=True)
         except AllProvidersFailedError as e:
             logger.error(f"All providers failed: {e}")
-            yield StreamChunk(
+            yield PlatformStreamChunk(
                 content=f"Error: {self._format_provider_error(e)}", is_final=True
             )
         except ProviderError as e:
             logger.error(f"Provider error: {e}")
-            yield StreamChunk(
+            yield PlatformStreamChunk(
                 content=f"Error: {self._format_provider_error(e)}", is_final=True
             )
 

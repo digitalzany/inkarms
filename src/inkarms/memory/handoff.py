@@ -188,19 +188,3 @@ class HandoffManager:
 
         return session
 
-    def list_pending_handoffs(self) -> list[HandoffDocument]:
-        """List all unrecovered handoffs.
-
-        Returns:
-            List of pending handoffs.
-        """
-        pending = []
-
-        for entry in self.storage.list_handoffs(include_archived=False):
-            handoff = self.storage._load_handoff_file(
-                self.storage.handoffs_path / f"{entry.name}.json"
-            )
-            if handoff and not handoff.recovered:
-                pending.append(handoff)
-
-        return pending

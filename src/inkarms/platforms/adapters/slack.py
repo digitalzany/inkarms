@@ -10,7 +10,7 @@ from inkarms.models.platforms import (
     PlatformCapabilities,
     PlatformType,
     PlatformUser,
-    StreamChunk,
+    PlatformStreamChunk,
 )
 from inkarms.platforms.adapters.protocol import PlatformAdapter
 
@@ -262,7 +262,7 @@ class SlackAdapter(PlatformAdapter):
     async def send_streaming_chunk(
         self,
         destination_id: str,
-        chunk: StreamChunk,
+        chunk: PlatformStreamChunk,
         message_id: str | None = None,
     ) -> str:
         """Send a streaming chunk via message editing."""

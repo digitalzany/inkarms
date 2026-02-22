@@ -130,7 +130,7 @@ def show(
             console.print()
             _show_session(snapshot.session, snapshot.name)
     elif entry.memory_type == MemoryType.HANDOFF:
-        handoff = manager.storage._load_handoff_file(Path(entry.path))
+        handoff = manager.storage.load_handoff_by_path(Path(entry.path))
         if handoff:
             _show_handoff(handoff)
 

@@ -6,7 +6,6 @@ It is UI-agnostic.
 """
 
 import yaml
-from enum import Enum, auto
 from pathlib import Path
 from typing import Any, Dict, Optional
 
@@ -20,18 +19,6 @@ from inkarms.storage.paths import get_global_config_path
 
 # Path to wizard configuration definition
 WIZARD_CONFIG_PATH = Path(__file__).parent.parent / "defaults" / "config_wizard.yaml"
-
-
-class WizardStep(Enum):
-    WELCOME = auto()
-    MODE_SELECTION = auto()
-    PROVIDER_SELECTION = auto()
-    MODEL_SELECTION = auto()
-    API_KEY = auto()
-    SECURITY_SANDBOX = auto()
-    TOOLS_CONFIG = auto()
-    CONFIRMATION = auto()
-    COMPLETE = auto()
 
 
 def load_wizard_definition() -> Dict[str, Any]:

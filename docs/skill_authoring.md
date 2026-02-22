@@ -420,50 +420,16 @@ Create test cases:
 
 ## Distributing Skills
 
-### Via Git Repository
+Currently, skills can be shared by distributing the skill directory.
 
-The recommended way:
+1.  **Package your skill:** Zip up your skill directory.
+2.  **Share:** Send it to your team or upload to a repo.
+3.  **Install:** Users unzip and run:
+    ```bash
+    inkarms skill install ./path/to/unzipped-skill
+    ```
 
-```bash
-# Create a repo for your skill
-git init my-awesome-skill
-cd my-awesome-skill
-# ... add SKILL.md and skill.yaml ...
-git add .
-git commit -m "Initial skill"
-git remote add origin https://github.com/you/my-awesome-skill
-git push -u origin main
-```
-
-Users install with:
-
-```bash
-inkarms skill install github:you/my-awesome-skill
-```
-
-### Via Skill Collection Repository
-
-Group related skills together:
-
-```
-my-skill-collection/
-├── README.md
-├── security-scan/
-│   ├── SKILL.md
-│   └── skill.yaml
-├── code-review/
-│   ├── SKILL.md
-│   └── skill.yaml
-└── documentation/
-    ├── SKILL.md
-    └── skill.yaml
-```
-
-Users install individual skills:
-
-```bash
-inkarms skill install github:you/my-skill-collection/security-scan
-```
+*Note: Remote installation from GitHub (e.g., `inkarms skill install github:user/repo`) is planned for a future release.*
 
 ## Best Practices
 

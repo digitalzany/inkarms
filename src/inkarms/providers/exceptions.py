@@ -1,10 +1,13 @@
-"""
-Provider exceptions for InkArms.
-
-Defines custom exceptions for provider-related errors.
-"""
-
 from enum import Enum
+
+from litellm.exceptions import (
+            APIConnectionError,
+            APIError,
+            AuthenticationError as LiteLLMAuthError,
+            ContextWindowExceededError as LiteLLMContextWindowExceededError,
+            RateLimitError as LiteLLMRateLimitError,
+            ServiceUnavailableError as LiteLLMServiceUnavailableError,
+)
 
 
 class FailureType(Enum):
@@ -103,49 +106,29 @@ def classify_error(error: Exception) -> FailureType:
     Returns:
         The failure type classification.
     """
-    # Import LiteLLM exceptions here to avoid circular imports
-    try:
-        from litellm.exceptions import (
-            APIConnectionError,
-            APIError,
-            AuthenticationError as LiteLLMAuthError,
-            ContextWindowExceededError,
-            RateLimitError as LiteLLMRateLimitError,
-            ServiceUnavailableError,
-        )
+    _exception_map = {
+        LiteLLMRateLimitError: FailureType.RATE_LIMIT,
+        LiteLLMAuthError: FailureType.AUTH_ERROR,
+        LiteLLMContextWindowExceededError: FailureType.CONTEXT_LENGTH,
+        APIConnectionError: FailureType.NETWORK_ERROR,
+        LiteLLMServiceUnavailableError: FailureType.NETWORK_ERROR,
+        RateLimitError: FailureType.RATE_LIMIT,
+        AuthenticationError: FailureType.AUTH_ERROR,
+        ContextLengthExceededError: FailureType.CONTEXT_LENGTH,
+        NetworkError: FailureType.NETWORK_ERROR,
+        ServerError: FailureType.SERVER_ERROR,
+        InvalidRequestError: FailureType.INVALID_REQUEST,
+    }
 
-        if isinstance(error, LiteLLMRateLimitError):
-            return FailureType.RATE_LIMIT
-        elif isinstance(error, LiteLLMAuthError):
-            return FailureType.AUTH_ERROR
-        elif isinstance(error, ContextWindowExceededError):
-            return FailureType.CONTEXT_LENGTH
-        elif isinstance(error, (APIConnectionError, ServiceUnavailableError)):
-            return FailureType.NETWORK_ERROR
-        elif isinstance(error, APIError):
-            # Check status code if available
-            status = getattr(error, "status_code", None)
-            if status and 500 <= status < 600:
-                return FailureType.SERVER_ERROR
-            elif status and 400 <= status < 500:
-                return FailureType.INVALID_REQUEST
-            return FailureType.UNKNOWN
-    except ImportError:
-        pass
+    if type(error) in _exception_map:
+        return _exception_map[type(error)]
 
-    # Check our own exceptions
-    if isinstance(error, RateLimitError):
-        return FailureType.RATE_LIMIT
-    elif isinstance(error, AuthenticationError):
-        return FailureType.AUTH_ERROR
-    elif isinstance(error, ContextLengthExceededError):
-        return FailureType.CONTEXT_LENGTH
-    elif isinstance(error, NetworkError):
-        return FailureType.NETWORK_ERROR
-    elif isinstance(error, ServerError):
-        return FailureType.SERVER_ERROR
-    elif isinstance(error, InvalidRequestError):
-        return FailureType.INVALID_REQUEST
+    if isinstance(error, APIError):
+        status = getattr(error, "status_code", None)
+        if status and 500 <= status < 600:
+            return FailureType.SERVER_ERROR
+        if status and 400 <= status < 500:
+            return FailureType.INVALID_REQUEST
 
     return FailureType.UNKNOWN
 

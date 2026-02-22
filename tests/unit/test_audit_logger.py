@@ -51,34 +51,21 @@ class TestAuditLogger:
         """Test logging query events."""
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "audit.jsonl"
-            logger = AuditLogger(
-                log_path=log_path, buffer_size=1, include_responses=True
-            )
+            logger = AuditLogger(log_path=log_path, buffer_size=1)
 
-            # Log query events
-            logger.log_query_start("What is AI?", "gpt-4")
-            logger.log_query_complete(
-                "What is AI?",
-                "gpt-4",
-                response="AI is artificial intelligence",
-                tokens=100,
-                cost=0.01,
-            )
-            logger.log_query_error("Bad query", "gpt-4", "Rate limit exceeded")
+            # Log query via log_query
+            logger.log_query("What is AI?", platform="cli", model="gpt-4")
 
             # Read log file
             with log_path.open() as f:
                 lines = f.readlines()
 
-            assert len(lines) == 3
+            assert len(lines) == 1
 
-            # Check event content
-            events = [json.loads(line) for line in lines]
-            assert events[0]["query"] == "What is AI?"
-            assert events[0]["model"] == "gpt-4"
-            assert events[1]["tokens"] == 100
-            assert events[1]["cost"] == 0.01
-            assert "response" in events[1]  # Because include_responses=True
+            event = json.loads(lines[0])
+            assert event["content"] == "What is AI?"
+            assert event["model"] == "gpt-4"
+            assert event["event_type"] == AuditEventType.QUERY_COMPLETE.value
 
     def test_buffering(self) -> None:
         """Test event buffering."""
@@ -146,38 +133,34 @@ class TestAuditLogger:
             )
 
             # Log query
-            logger.log_query_start("Sensitive query", "gpt-4")
+            logger.log_query("Sensitive query", platform="cli")
 
             # Read log
             with log_path.open() as f:
                 event = json.loads(f.readline())
 
-            # Query should be hashed
-            assert event["query"] != "Sensitive query"
-            assert len(event["query"]) == 64  # SHA256 hash length
+            # Content should be hashed
+            assert event["content"] != "Sensitive query"
+            assert len(event["content"]) == 64  # SHA256 hash length
 
     def test_include_responses_false(self) -> None:
-        """Test that responses are not logged when disabled."""
+        """Test that stdout/stderr are not logged when include_responses is disabled."""
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "audit.jsonl"
             logger = AuditLogger(
                 log_path=log_path, buffer_size=1, include_responses=False
             )
 
-            # Log query with response
-            logger.log_query_complete(
-                "query", "gpt-4", response="This should not be logged"
-            )
+            logger.log_command_complete("ls", exit_code=0, stdout="file1", stderr="")
 
-            # Read log
             with log_path.open() as f:
                 event = json.loads(f.readline())
 
-            # Response should not be present
-            assert "response" not in event
+            assert "stdout" not in event
+            assert "stderr" not in event
 
     def test_include_queries_false(self) -> None:
-        """Test that queries are not logged when disabled."""
+        """Test that content is hashed when include_queries is disabled."""
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "audit.jsonl"
             logger = AuditLogger(
@@ -188,67 +171,50 @@ class TestAuditLogger:
             )
 
             # Log query
-            logger.log_query_start("Secret query", "gpt-4")
+            logger.log_query("Secret query", platform="cli")
 
             # Read log
             with log_path.open() as f:
                 event = json.loads(f.readline())
 
-            # Query should be hashed (hash_queries takes precedence)
-            assert len(event["query"]) == 64
+            # Content should be hashed (hash_queries takes precedence)
+            assert len(event["content"]) == 64
 
-    def test_skill_events(self) -> None:
-        """Test logging skill events."""
+    def test_tool_events(self) -> None:
+        """Test logging tool execution events."""
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "audit.jsonl"
             logger = AuditLogger(log_path=log_path, buffer_size=1)
 
-            logger.log_skill_installed("test-skill", "github:user/repo")
-            logger.log_skill_removed("test-skill")
+            logger.log_tool_start("bash", "call-1", parameters={"command": "ls"})
+            logger.log_tool_complete("bash", "call-1", execution_time=0.1, output_preview="file1")
+            logger.log_tool_denied("bash", "call-2", reason="dangerous")
+            logger.log_tool_error("bash", "call-3", execution_time=0.05, error="timeout")
 
             with log_path.open() as f:
                 lines = f.readlines()
 
             events = [json.loads(line) for line in lines]
-            assert events[0]["event_type"] == AuditEventType.SKILL_INSTALLED.value
-            assert events[0]["skill_name"] == "test-skill"
-            assert events[1]["event_type"] == AuditEventType.SKILL_REMOVED.value
+            assert events[0]["event_type"] == AuditEventType.TOOL_START.value
+            assert events[0]["tool_name"] == "bash"
+            assert events[1]["event_type"] == AuditEventType.TOOL_COMPLETE.value
+            assert events[2]["event_type"] == AuditEventType.TOOL_DENIED.value
+            assert events[3]["event_type"] == AuditEventType.TOOL_ERROR.value
 
-    def test_session_events(self) -> None:
-        """Test logging session events."""
+    def test_hub_cron_run(self) -> None:
+        """Test logging cron job execution."""
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "audit.jsonl"
             logger = AuditLogger(log_path=log_path, buffer_size=1)
 
-            logger.log_session_start("session-123")
-            logger.log_session_end("session-123", total_tokens=500, total_cost=0.05)
+            logger.log_hub_cron_run(job_id="job-1", result="OK: done")
 
             with log_path.open() as f:
-                lines = f.readlines()
+                event = json.loads(f.readline())
 
-            events = [json.loads(line) for line in lines]
-            assert events[0]["event_type"] == AuditEventType.SESSION_START.value
-            assert events[0]["session_id"] == "session-123"
-            assert events[1]["total_tokens"] == 500
-            assert events[1]["total_cost"] == 0.05
-
-    def test_close_flushes_buffer(self) -> None:
-        """Test that close() flushes remaining events."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            log_path = Path(tmpdir) / "audit.jsonl"
-            logger = AuditLogger(log_path=log_path, buffer_size=100)
-
-            # Log an event
-            logger.log_command_start("test")
-
-            # Close logger
-            logger.close()
-
-            # Event should be flushed
-            assert log_path.exists()
-            with log_path.open() as f:
-                lines = f.readlines()
-            assert len(lines) == 1
+            assert event["event_type"] == AuditEventType.HUB_CRON_RUN.value
+            assert event["job_id"] == "job-1"
+            assert event["result"] == "OK: done"
 
     def test_timestamp_format(self) -> None:
         """Test that timestamps are in ISO format."""
@@ -266,18 +232,17 @@ class TestAuditLogger:
             # Should parse without error
             datetime.fromisoformat(event["timestamp"])
 
-    def test_config_change_event(self) -> None:
-        """Test logging configuration changes."""
+    def test_hub_trigger_fired(self) -> None:
+        """Test logging hub trigger invocations."""
         with tempfile.TemporaryDirectory() as tmpdir:
             log_path = Path(tmpdir) / "audit.jsonl"
             logger = AuditLogger(log_path=log_path, buffer_size=1)
 
-            logger.log_config_changed("providers.default", "gpt-4", "claude-3")
+            logger.log_hub_trigger_fired("my-trigger", "session-1", status_code=200)
 
             with log_path.open() as f:
                 event = json.loads(f.readline())
 
-            assert event["event_type"] == AuditEventType.CONFIG_CHANGED.value
-            assert event["key"] == "providers.default"
-            assert event["old_value"] == "gpt-4"
-            assert event["new_value"] == "claude-3"
+            assert event["event_type"] == AuditEventType.HUB_TRIGGER_FIRED.value
+            assert event["trigger_name"] == "my-trigger"
+            assert event["status_code"] == 200

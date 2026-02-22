@@ -13,6 +13,7 @@ from inkarms.agent.definitions import ToolDefinitionBuilder
 from inkarms.agent.execution import ToolExecutor
 from inkarms.agent.parser import ToolCallParser
 from inkarms.models.agent import AgentConfig, AgentEvent, EventType
+from inkarms.models.providers import Message
 from inkarms.models.tools import ToolCall, ToolResult
 from inkarms.providers.manager import ProviderManager
 from inkarms.tools.base import Tool
@@ -121,7 +122,7 @@ class AgentLoop:
 
     async def run(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[dict[str, Any]] | list[Message],
         model: str | None = None,
     ) -> AgentResult:
         """Run agent loop with tool use."""

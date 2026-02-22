@@ -127,7 +127,8 @@ class SkillManager:
         """
         return load_skill(name_or_path, self.project_path)
 
-    def search(self, query: str, max_results: int = 5) -> list[SkillIndexEntry]:
+    @staticmethod
+    def search(query: str, max_results: int = 5) -> list[SkillIndexEntry]:
         """Search for skills by keyword.
 
         Args:
@@ -139,7 +140,8 @@ class SkillManager:
         """
         return search_skills(query, max_results)
 
-    def get_skills_for_query(self, query: str, max_skills: int = 3) -> list[Skill]:
+    @staticmethod
+    def get_skills_for_query(query: str, max_skills: int = 3) -> list[Skill]:
         """Get skills relevant to a user query.
 
         This is the main method for automatic skill discovery.
@@ -165,7 +167,8 @@ class SkillManager:
 
         return skills
 
-    def list_skills(self, include_project: bool = True) -> list[SkillIndexEntry]:
+    @staticmethod
+    def list_skills(include_project: bool = True) -> list[SkillIndexEntry]:
         """List all installed skills.
 
         Args:
@@ -351,7 +354,8 @@ class SkillManager:
 
         return False
 
-    def validate_skill(self, path: Path) -> list[str]:
+    @staticmethod
+    def validate_skill(path: Path) -> list[str]:
         """Validate a skill directory.
 
         Args:

@@ -20,14 +20,6 @@ from inkarms.config.merger import (
     merge_configs,
     set_nested_value,
 )
-from inkarms.config.setup import (
-    create_default_config,
-    create_directory_structure,
-    create_profile,
-    create_project_config,
-    is_initialized,
-    run_setup,
-)
 from inkarms.config.schema import (
     AuditLogConfig,
     BudgetConfig,
@@ -36,14 +28,11 @@ from inkarms.config.schema import (
     ContextConfig,
     CostAlertsConfig,
     CostConfig,
-    DeepThinkingConfig,
-    DeepThinkingStep,
     GeneralConfig,
     HandoffConfig,
     OutputConfig,
     PluginsConfig,
     ProfileMeta,
-    PromptSuffix,
     ProviderConfig,
     RestrictedPathsConfig,
     SandboxConfig,
@@ -54,7 +43,14 @@ from inkarms.config.schema import (
     SmartIndexConfig,
     StorageConfig,
     SystemPromptConfig,
-    TaskRoutingConfig,
+)
+from inkarms.config.setup import (
+    create_default_config,
+    create_directory_structure,
+    create_profile,
+    create_project_config,
+    is_initialized,
+    run_setup,
 )
 
 __all__ = [
@@ -87,14 +83,11 @@ __all__ = [
     "ContextConfig",
     "CostAlertsConfig",
     "CostConfig",
-    "DeepThinkingConfig",
-    "DeepThinkingStep",
     "GeneralConfig",
     "HandoffConfig",
     "OutputConfig",
     "PluginsConfig",
     "ProfileMeta",
-    "PromptSuffix",
     "ProviderConfig",
     "RestrictedPathsConfig",
     "SandboxConfig",
@@ -105,5 +98,4 @@ __all__ = [
     "SmartIndexConfig",
     "StorageConfig",
     "SystemPromptConfig",
-    "TaskRoutingConfig",
 ]

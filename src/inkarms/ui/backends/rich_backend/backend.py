@@ -1,19 +1,13 @@
-"""
-Rich + prompt_toolkit UI Backend.
-
-This is the default, lightweight UI backend using Rich for formatting
-and prompt_toolkit for full-screen applications and input handling.
-"""
-
 from __future__ import annotations
 
 import logging
 import threading
 from datetime import datetime
+from typing import TYPE_CHECKING
 
 from inkarms.config.wizard import RichWizard
-from inkarms.memory import get_session_manager
-from inkarms.memory.session_persistence import SessionPersistence
+from inkarms.memory import SessionManager, get_session_manager
+from inkarms.memory.session_persistence import UISessionPersistence
 from inkarms.models.memory import Snapshot
 from inkarms.ui.backends.rich_backend.components.chat import ChatView
 from inkarms.ui.backends.rich_backend.components.dashboard import DashboardView
@@ -21,9 +15,15 @@ from inkarms.ui.backends.rich_backend.components.input import TextInput
 from inkarms.ui.backends.rich_backend.components.menu import MainMenu, Menu
 from inkarms.ui.protocol import ChatMessage, SessionInfo, StatusInfo, UIBackend, UIConfig, UIView
 
+if TYPE_CHECKING:
+    from inkarms.agent import AgentConfig
+    from inkarms.config import Config
+    from inkarms.providers import ProviderManager
+    from inkarms.security.sandbox import SandboxExecutor
+    from inkarms.skills import SkillManager
+    from inkarms.tools.registry import ToolRegistry
+
 logger = logging.getLogger(__name__)
-
-
 
 
 class RichBackend(UIBackend):
@@ -37,16 +37,16 @@ class RichBackend(UIBackend):
         self._configured = False
         self._streaming_content = ""
         self._session_dirty = False
-        self._session_persistence: SessionPersistence | None = None
+        self._session_persistence: UISessionPersistence | None = None
 
         # Will be set during initialization
-        self._provider_manager = None
-        self._session_manager = None
-        self._skill_manager = None
-        self._app_config = None
-        self._tool_registry = None
-        self._sandbox = None
-        self._agent_config = None
+        self._provider_manager: ProviderManager | None = None
+        self._session_manager: SessionManager | None = None
+        self._skill_manager: SkillManager | None = None
+        self._app_config: Config | None = None
+        self._tool_registry: ToolRegistry | None = None
+        self._sandbox: SandboxExecutor | None = None
+        self._agent_config: AgentConfig | None = None
 
     # --- Properties ---
 
@@ -57,6 +57,10 @@ class RichBackend(UIBackend):
     @property
     def is_configured(self) -> bool:
         return self._configured
+
+    @is_configured.setter
+    def is_configured(self, value: bool) -> None:
+        self._configured = value
 
     @property
     def status(self) -> StatusInfo:
@@ -73,17 +77,17 @@ class RichBackend(UIBackend):
         self._messages = value
 
     @property
-    def session_manager(self):
+    def session_manager(self) -> SessionManager | None:
         """Session manager instance (None if not configured)."""
         return self._session_manager
 
     @property
-    def agent_config(self):
+    def agent_config(self) -> AgentConfig | None:
         """Agent configuration (None if not configured)."""
         return self._agent_config
 
     @property
-    def tool_registry(self):
+    def tool_registry(self) -> ToolRegistry | None:
         """Tool registry (None if not configured)."""
         return self._tool_registry
 
@@ -156,7 +160,7 @@ class RichBackend(UIBackend):
             if self._configured:
                 try:
                     self._session_manager = get_session_manager(model=default_model)
-                    self._session_persistence = SessionPersistence(self._session_manager.storage)
+                    self._session_persistence = UISessionPersistence(self._session_manager.storage)
                     self._update_status_from_session()
 
                     # Check for pending handoff
@@ -231,7 +235,7 @@ class RichBackend(UIBackend):
                 elif current_view == UIView.CHAT:
                     if not self._current_session:
                         if not self._try_resume_recent_session():
-                            self.create_session(SessionPersistence.generate_session_name())
+                            self.create_session(UISessionPersistence.generate_session_name())
                     current_view = self.run_chat()
                 elif current_view == UIView.DASHBOARD:
                     current_view = self.run_dashboard()
@@ -309,8 +313,14 @@ class RichBackend(UIBackend):
             self._streaming_content = ""
 
     def display_error(self, message: str) -> None:
-        # For now just log, TODO: show in UI
         logger.error(message)
+        self._messages.append(
+            ChatMessage(
+                role="system",
+                content=f"Error: {message}",
+                timestamp=datetime.now().strftime("%H:%M"),
+            )
+        )
 
     def display_info(self, message: str) -> None:
         logger.info(message)
@@ -503,7 +513,7 @@ class RichBackend(UIBackend):
             name = self.get_text_input(
                 "New Session",
                 "Name: ",
-                default=SessionPersistence.generate_session_name(),
+                default=UISessionPersistence.generate_session_name(),
             )
             if name:
                 self.create_session(name)

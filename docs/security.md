@@ -428,12 +428,17 @@ audit_log:
 
 ### 6. Review Logs Regularly
 
-```bash
-# Weekly audit
-inkarms audit search --last-week
+The audit log is a plain JSONL file — pipe it through `jq` to search:
 
-# Check for blocked commands
-inkarms audit search --type command_blocked
+```bash
+# View the last 50 events
+tail -n 50 ~/.inkarms/audit/audit.jsonl | jq .
+
+# Find blocked commands from the last week
+jq 'select(.event_type == "command_blocked")' ~/.inkarms/audit/audit.jsonl
+
+# Filter by session
+jq --arg sid "my-session-id" 'select(.session_id == $sid)' ~/.inkarms/audit/audit.jsonl
 ```
 
 ### 7. Use Query Hashing for Sensitive Work

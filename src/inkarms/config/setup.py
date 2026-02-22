@@ -110,12 +110,11 @@ def is_initialized() -> bool:
     return home.exists() and config.exists()
 
 
-def run_setup(interactive: bool = False, force: bool = False) -> dict[str, Any]:
+def run_setup(force: bool = False) -> dict[str, Any]:
     """
     Run the first-time setup process.
 
     Args:
-        interactive: If True, prompt user for configuration choices.
         force: If True, overwrite existing configuration.
 
     Returns:

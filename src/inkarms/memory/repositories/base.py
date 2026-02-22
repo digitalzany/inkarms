@@ -37,7 +37,8 @@ class JsonFileRepository(Generic[T]):
         """Save dictionary to JSON file."""
         self._atomic_write(path, json.dumps(data, indent=2, default=str))
 
-    def _load_json(self, path: Path) -> dict[str, Any] | None:
+    @staticmethod
+    def _load_json(path: Path) -> dict[str, Any] | None:
         """Load dictionary from JSON file."""
         if not path.exists():
             return None
@@ -46,7 +47,8 @@ class JsonFileRepository(Generic[T]):
         except (json.JSONDecodeError, KeyError):
             return None
 
-    def delete(self, path: Path) -> bool:
+    @staticmethod
+    def delete(path: Path) -> bool:
         """Delete a file if it exists."""
         if path.exists():
             path.unlink()

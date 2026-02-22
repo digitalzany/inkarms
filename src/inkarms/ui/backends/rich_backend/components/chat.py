@@ -54,43 +54,6 @@ class ChatView:
 
         self.add_key_bindings()
 
-    def _get_history_text(self):
-        """Format message history for display - same pattern as working demo."""
-        lines = []
-        messages = self.backend.messages
-
-        if not messages and not self.streaming:
-            lines.append(("class:info", "  Start typing to chat...\n"))
-            lines.append(("class:hint", "  Type /help for commands\n"))
-            return lines
-
-        for msg in messages:
-            ts = msg.timestamp if self.backend.config.show_timestamps else ""
-            if msg.role == "user":
-                if ts:
-                    lines.append(("class:info", f"[{ts}] "))
-                lines.append(("class:user", "You: "))
-                lines.append(("", f"{msg.content}\n\n"))
-            else:
-                if ts:
-                    lines.append(("class:info", f"[{ts}] "))
-                lines.append(("class:assistant", "Assistant: "))
-                # Plain text - prompt_toolkit doesn't support ANSI from Rich
-                lines.append(("", f"{msg.content}\n\n"))
-
-        # Show streaming content
-        if self.streaming:
-            lines.append(("class:assistant", "Assistant: "))
-            if self.streaming_content:
-                lines.append(("", f"{self.streaming_content}▌\n"))
-            else:
-                lines.append(("class:info", "thinking...▌\n"))
-
-        if self.pending_message:
-            lines.append(("class:warning", f"\n  {self.pending_message}\n"))
-
-        return lines
-
     def _get_status_text(self):
         """Status bar text."""
         from inkarms.ui.backends.rich_backend.helpers import build_status_bar

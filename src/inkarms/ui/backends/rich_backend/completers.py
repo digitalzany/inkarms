@@ -23,7 +23,8 @@ class CommandCompleter(Completer):
 
     COMMANDS = CommandRegistry.list_commands() + _TUI_COMMANDS
 
-    def _fuzzy_match(self, text: str, cmd: str) -> bool:
+    @staticmethod
+    def _fuzzy_match(text: str, cmd: str) -> bool:
         if cmd.startswith(text):
             return True
         text_lower = text.lower()
@@ -34,7 +35,8 @@ class CommandCompleter(Completer):
                 t_idx += 1
         return t_idx == len(text_lower)
 
-    def _match_score(self, text: str, cmd: str) -> int:
+    @staticmethod
+    def _match_score(text: str, cmd: str) -> int:
         return 0 if cmd.startswith(text) else 1
 
     def get_completions(self, document, complete_event):
