@@ -214,8 +214,8 @@ class QueryProcessor:
 
     # --- Private helpers ---
 
+    @staticmethod
     def _run_in_thread(
-        self,
         async_fn: Callable[[asyncio.AbstractEventLoop], Coroutine],
         on_success: Callable,
         on_error: Callable[[str], None],

@@ -2,15 +2,14 @@
 UI Backend Protocol - Abstract interface for UI implementations.
 
 This module defines the contract that all UI backends must implement.
-Backends can be Rich+prompt_toolkit, Textual, or future implementations.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 
 
-class UIView(str, Enum):
+class UIView(StrEnum):
     """Available UI views."""
 
     MENU = "menu"

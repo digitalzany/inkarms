@@ -2,7 +2,7 @@
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -26,8 +26,8 @@ class PlatformUser(BaseModel):
 
     platform: PlatformType
     platform_user_id: str  # Platform-specific user identifier
-    username: Optional[str] = None
-    display_name: Optional[str] = None
+    username: str | None = None
+    display_name: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def __str__(self) -> str:
@@ -47,8 +47,8 @@ class PlatformCapabilities(BaseModel):
     supports_reactions: bool = False
     supports_typing_indicator: bool = False
     supports_message_editing: bool = False
-    markdown_flavor: Optional[str] = None  # e.g., "MarkdownV2", "mrkdwn", "standard"
-    max_message_length: Optional[int] = None
+    markdown_flavor: str | None = None  # e.g., "MarkdownV2", "mrkdwn", "standard"
+    max_message_length: int | None = None
 
 
 class IncomingMessage(BaseModel):
@@ -58,8 +58,8 @@ class IncomingMessage(BaseModel):
     user: PlatformUser
     content: str
     message_id: str  # Platform-specific message identifier
-    thread_id: Optional[str] = None  # For threaded conversations
-    reply_to_message_id: Optional[str] = None
+    thread_id: str | None = None  # For threaded conversations
+    reply_to_message_id: str | None = None
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -73,15 +73,15 @@ class OutgoingMessage(BaseModel):
 
     content: str
     format: str = "plain"  # "plain", "markdown", "html"
-    thread_id: Optional[str] = None
-    reply_to_message_id: Optional[str] = None
+    thread_id: str | None = None
+    reply_to_message_id: str | None = None
     buttons: list[dict[str, str]] = Field(default_factory=list)
     attachments: list[dict[str, Any]] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class StreamChunk(BaseModel):
-    """Represents a chunk of streaming response."""
+class PlatformStreamChunk(BaseModel):
+    """Represents a chunk of streaming response from a platform message processor."""
 
     content: str
     is_final: bool = False

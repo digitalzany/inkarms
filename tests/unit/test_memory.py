@@ -236,12 +236,6 @@ class TestContextTracker:
         usage = tracker.track_session(session)
         assert usage.current_tokens > 0
 
-    def test_can_fit(self):
-        """Test checking if tokens can fit."""
-        tracker = ContextTracker(model="default")
-        assert tracker.can_fit(1000) is True
-        assert tracker.can_fit(999999999) is False
-
 
 # =============================================================================
 # Compaction Tests

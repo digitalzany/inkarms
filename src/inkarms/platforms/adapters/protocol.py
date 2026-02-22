@@ -12,7 +12,7 @@ from inkarms.models.platforms import (
     OutgoingMessage,
     PlatformCapabilities,
     PlatformType,
-    StreamChunk,
+    PlatformStreamChunk,
 )
 
 logger = logging.getLogger(__name__)
@@ -109,7 +109,7 @@ class PlatformAdapter(ABC):
     async def send_streaming_chunk(
         self,
         destination_id: str,
-        chunk: StreamChunk,
+        chunk: PlatformStreamChunk,
         message_id: str | None = None,
     ) -> str:
         """Send a streaming chunk to a destination.

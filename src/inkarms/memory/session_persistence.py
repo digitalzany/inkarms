@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 UI_SESSION_TAG = "ui-session"
 
 
-class SessionPersistence:
+class UISessionPersistence:
     """Manages persistent UI sessions via tagged snapshots."""
 
     def __init__(self, storage: MemoryStorage):

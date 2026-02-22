@@ -575,9 +575,7 @@ def init(
 
         except ImportError:
             console.print("[red]UI dependencies not found.[/red]")
-            console.print(
-                "[dim]Install with: pip install inkarms[textual][/dim]"
-            )  # rich is default now but message helps
+            console.print("[dim]Install with: pip install inkarms[/dim]")
             raise typer.Exit(1)
 
         except Exception as e:

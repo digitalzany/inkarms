@@ -10,12 +10,10 @@ from typing import Annotated
 
 from inkarms import __version__
 from inkarms.cli.commands import (
-    audit,
     config,
     hub,
     memory,
     platforms,
-    profile,
     run,
     skill,
     status,
@@ -75,7 +73,7 @@ def main_callback(
         str | None,
         typer.Option(
             "--ui",
-            help="UI backend: auto, rich, or textual.",
+            help="UI backend: auto or rich.",
         ),
     ] = None,
 ) -> None:
@@ -100,8 +98,6 @@ app.add_typer(skill.app, name="skill")
 app.add_typer(tools.app, name="tools")
 app.add_typer(memory.app, name="memory")
 app.add_typer(status.app, name="status")
-app.add_typer(audit.app, name="audit")
-app.add_typer(profile.app, name="profile")
 app.add_typer(platforms.app, name="platforms")
 app.add_typer(hub.app, name="hub")
 
@@ -152,7 +148,7 @@ def ui(
         typer.Option(
             "--backend",
             "-b",
-            help="UI backend: auto, rich, or textual.",
+            help="UI backend: auto or rich.",
         ),
     ] = None,
 ) -> None:

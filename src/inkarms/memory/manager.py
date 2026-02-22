@@ -72,16 +72,13 @@ class SessionManager:
             tracker=self.tracker,
             strategy=config.context.compaction.strategy,
             preserve_recent=config.context.compaction.preserve_recent_turns,
-            summary_model=config.context.compaction.summary_model,
+            summary_model=config.context.compaction.summary_model or config.providers.default,
             summary_max_tokens=config.context.compaction.summary_max_tokens,
         )
         self.handoff_manager = HandoffManager(
             storage=self._storage,
             include_full_context=config.context.handoff.include_full_context,
         )
-
-        # Summary model (used by create_handoff)
-        self._summary_model = config.context.compaction.summary_model
 
         # Current session
         self._session: Session | None = None
@@ -256,7 +253,7 @@ class SessionManager:
         """
         return await self.handoff_manager.create_handoff(
             self.session,
-            summary_model=self._summary_model,
+            summary_model=self.compaction.summary_model,
         )
 
     def check_for_handoff(self) -> HandoffDocument | None:

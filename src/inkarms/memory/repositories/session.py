@@ -21,7 +21,8 @@ class SessionRepository(JsonFileRepository[Session]):
         """Initialize session repository."""
         super().__init__(base_path / "daily")
 
-    def _serialize(self, session: Session) -> dict[str, Any]:
+    @staticmethod
+    def serialize(session: Session) -> dict[str, Any]:
         """Serialize a session to dict."""
         return {
             "metadata": session.metadata.model_dump(mode="json"),
@@ -35,7 +36,8 @@ class SessionRepository(JsonFileRepository[Session]):
             ],
         }
 
-    def _deserialize(self, data: dict[str, Any]) -> Session:
+    @staticmethod
+    def deserialize(data: dict[str, Any]) -> Session:
         """Deserialize a session from dict."""
         # Parse metadata
         meta_data = data.get("metadata", {})
@@ -69,7 +71,7 @@ class SessionRepository(JsonFileRepository[Session]):
     def save(self, session: Session, date: datetime | None = None) -> Path:
         """Save a session as a daily log."""
         path = self.get_path(date)
-        data = self._serialize(session)
+        data = self.serialize(session)
         self._save_json(path, data)
         return path
 
@@ -79,7 +81,7 @@ class SessionRepository(JsonFileRepository[Session]):
         data = self._load_json(path)
         if not data:
             return None
-        return self._deserialize(data)
+        return self.deserialize(data)
 
     def list_entries(self) -> list[MemoryEntry]:
         """List all daily session files."""

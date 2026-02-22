@@ -1,33 +1,3 @@
-"""
-InkArms Memory System.
-
-Provides context tracking, session management, and memory persistence.
-
-Usage:
-    from inkarms.memory import SessionManager, get_session_manager
-
-    # Get the session manager
-    manager = get_session_manager()
-
-    # Add messages
-    manager.add_user_message("Hello!")
-    manager.add_assistant_message("Hi there!")
-
-    # Check context usage
-    usage = manager.get_context_usage()
-    print(f"Context: {usage.format_status()}")
-
-    # Compact if needed
-    if manager.should_compact():
-        await manager.compact()
-
-    # Create handoff when context is full
-    if manager.should_handoff():
-        await manager.create_handoff()
-"""
-
-# Models
-# Compaction
 from inkarms.memory.compaction import (
     BaseCompactor,
     CompactionOrchestrator,

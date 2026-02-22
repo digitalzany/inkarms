@@ -14,13 +14,6 @@ class SnapshotRepository(JsonFileRepository[Snapshot]):
     def __init__(self, base_path: Path):
         """Initialize snapshot repository."""
         super().__init__(base_path / "snapshots")
-        # We need a SessionRepository to reuse serialization logic
-        # Ideally, we should decouple this, but for now we'll reuse the logic
-        # by creating a temporary instance or just duplicating the logic if it's small.
-        # Duplicating small logic is better than coupling repositories.
-        # But `_serialize_session` is quite specific.
-        # Let's import the helper if we can, or just reimplement.
-        # Since I'm inside the same package structure, I'll instantiate a helper.
         self._session_repo = SessionRepository(base_path)
 
     def save(self, snapshot: Snapshot) -> Path:
@@ -35,7 +28,7 @@ class SnapshotRepository(JsonFileRepository[Snapshot]):
             "created_at": snapshot.created_at.isoformat(),
             "tags": snapshot.tags,
             "topic": snapshot.topic,
-            "session": self._session_repo._serialize(snapshot.session),
+            "session": self._session_repo.serialize(snapshot.session),
         }
 
         self._save_json(path, data)
@@ -56,7 +49,7 @@ class SnapshotRepository(JsonFileRepository[Snapshot]):
                 created_at=datetime.fromisoformat(data["created_at"]),
                 tags=data.get("tags", []),
                 topic=data.get("topic"),
-                session=self._session_repo._deserialize(data["session"]),
+                session=self._session_repo.deserialize(data["session"]),
             )
         except (ValueError, KeyError):
             return None

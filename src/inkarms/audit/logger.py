@@ -25,25 +25,7 @@ class AuditEventType(str, Enum):
     COMMAND_ERROR = "command_error"
 
     # Query operations
-    QUERY_START = "query_start"
     QUERY_COMPLETE = "query_complete"
-    QUERY_ERROR = "query_error"
-
-    # Configuration changes
-    CONFIG_CHANGED = "config_changed"
-    SECRET_ADDED = "secret_added"
-    SECRET_DELETED = "secret_deleted"
-
-    # Skill operations
-    SKILL_INSTALLED = "skill_installed"
-    SKILL_REMOVED = "skill_removed"
-    SKILL_LOADED = "skill_loaded"
-
-    # Session operations
-    SESSION_START = "session_start"
-    SESSION_END = "session_end"
-    CONTEXT_COMPACTED = "context_compacted"
-    HANDOFF_CREATED = "handoff_created"
 
     # Tool execution events
     TOOL_START = "tool_start"
@@ -51,15 +33,9 @@ class AuditEventType(str, Enum):
     TOOL_DENIED = "tool_denied"
     TOOL_ERROR = "tool_error"
 
-    # System events
-    SYSTEM_START = "system_start"
-    SYSTEM_ERROR = "system_error"
-
     # Platform messaging events
     PLATFORM_MESSAGE_RECEIVED = "platform_message_received"
     PLATFORM_MESSAGE_SENT = "platform_message_sent"
-    PLATFORM_USER_BLOCKED = "platform_user_blocked"
-    PLATFORM_RATE_LIMITED = "platform_rate_limited"
     PLATFORM_ADAPTER_STARTED = "platform_adapter_started"
     PLATFORM_ADAPTER_STOPPED = "platform_adapter_stopped"
     PLATFORM_ADAPTER_ERROR = "platform_adapter_error"
@@ -67,7 +43,6 @@ class AuditEventType(str, Enum):
     # Hub daemon events
     HUB_STARTED = "hub_started"
     HUB_STOPPED = "hub_stopped"
-    HUB_REQUEST = "hub_request"
     HUB_CRON_RUN = "hub_cron_run"
     HUB_TRIGGER_FIRED = "hub_trigger_fired"
 
@@ -373,51 +348,6 @@ class AuditLogger:
         )
         self._write_event(event)
 
-    def log_query_start(self, query: str, model: str) -> None:
-        """Log the start of a query."""
-        event = self._create_event(
-            AuditEventType.QUERY_START,
-            {
-                "query": query if self.include_queries and not self.hash_queries else self._hash_text(query),
-                "model": model,
-            },
-        )
-        self._write_event(event)
-
-    def log_query_complete(
-        self,
-        query: str,
-        model: str,
-        response: str = "",
-        tokens: int = 0,
-        cost: float = 0.0,
-    ) -> None:
-        """Log a completed query."""
-        data: dict[str, Any] = {
-            "query": query if self.include_queries and not self.hash_queries else self._hash_text(query),
-            "model": model,
-            "tokens": tokens,
-            "cost": cost,
-        }
-
-        if self.include_responses:
-            data["response"] = response
-
-        event = self._create_event(AuditEventType.QUERY_COMPLETE, data)
-        self._write_event(event)
-
-    def log_query_error(self, query: str, model: str, error: str) -> None:
-        """Log a query error."""
-        event = self._create_event(
-            AuditEventType.QUERY_ERROR,
-            {
-                "query": query if self.include_queries and not self.hash_queries else self._hash_text(query),
-                "model": model,
-                "error": error,
-            },
-        )
-        self._write_event(event)
-
     def log_query(
         self,
         content: str,
@@ -442,48 +372,6 @@ class AuditLogger:
             data["model"] = model
 
         event = self._create_event(AuditEventType.QUERY_COMPLETE, data)
-        self._write_event(event)
-
-    def log_config_changed(self, key: str, old_value: Any, new_value: Any) -> None:
-        """Log a configuration change."""
-        event = self._create_event(
-            AuditEventType.CONFIG_CHANGED,
-            {"key": key, "old_value": str(old_value), "new_value": str(new_value)},
-        )
-        self._write_event(event)
-
-    def log_skill_installed(self, skill_name: str, source: str) -> None:
-        """Log a skill installation."""
-        event = self._create_event(
-            AuditEventType.SKILL_INSTALLED,
-            {"skill_name": skill_name, "source": source},
-        )
-        self._write_event(event)
-
-    def log_skill_removed(self, skill_name: str) -> None:
-        """Log a skill removal."""
-        event = self._create_event(
-            AuditEventType.SKILL_REMOVED, {"skill_name": skill_name}
-        )
-        self._write_event(event)
-
-    def log_session_start(self, session_id: str) -> None:
-        """Log a session start."""
-        event = self._create_event(
-            AuditEventType.SESSION_START, {"session_id": session_id}
-        )
-        self._write_event(event)
-
-    def log_session_end(self, session_id: str, total_tokens: int, total_cost: float) -> None:
-        """Log a session end."""
-        event = self._create_event(
-            AuditEventType.SESSION_END,
-            {
-                "session_id": session_id,
-                "total_tokens": total_tokens,
-                "total_cost": total_cost,
-            },
-        )
         self._write_event(event)
 
     def log_platform_message_received(
@@ -547,40 +435,6 @@ class AuditLogger:
         event = self._create_event(AuditEventType.PLATFORM_MESSAGE_SENT, data)
         self._write_event(event)
 
-    def log_platform_user_blocked(
-        self,
-        platform: str,
-        user_id: str,
-        reason: str,
-    ) -> None:
-        """Log a blocked platform user."""
-        event = self._create_event(
-            AuditEventType.PLATFORM_USER_BLOCKED,
-            {
-                "platform": platform,
-                "user_id": user_id,
-                "reason": reason,
-            },
-        )
-        self._write_event(event)
-
-    def log_platform_rate_limited(
-        self,
-        platform: str,
-        user_id: str,
-        retry_after: float,
-    ) -> None:
-        """Log a rate limited platform user."""
-        event = self._create_event(
-            AuditEventType.PLATFORM_RATE_LIMITED,
-            {
-                "platform": platform,
-                "user_id": user_id,
-                "retry_after": retry_after,
-            },
-        )
-        self._write_event(event)
-
     def log_platform_adapter_started(self, platform: str, mode: str) -> None:
         """Log a platform adapter start."""
         event = self._create_event(
@@ -629,43 +483,12 @@ class AuditLogger:
         )
         self._write_event(event)
 
-    def log_hub_request(
-        self,
-        method: str,
-        path: str,
-        status_code: int,
-        duration_ms: float,
-    ) -> None:
-        """Log an authenticated hub API request."""
-        event = self._create_event(
-            AuditEventType.HUB_REQUEST,
-            {
-                "method": method,
-                "path": path,
-                "status_code": status_code,
-                "duration_ms": duration_ms,
-            },
-        )
-        self._write_event(event)
-
-    def log_hub_cron_run(
-        self,
-        job_id: str,
-        job_type: str,
-        success: bool,
-        duration_ms: float,
-        error: str | None = None,
-    ) -> None:
+    def log_hub_cron_run(self, job_id: str, result: str = "") -> None:
         """Log a cron job execution."""
-        data: dict[str, Any] = {
-            "job_id": job_id,
-            "job_type": job_type,
-            "success": success,
-            "duration_ms": duration_ms,
-        }
-        if error:
-            data["error"] = error
-        event = self._create_event(AuditEventType.HUB_CRON_RUN, data)
+        event = self._create_event(
+            AuditEventType.HUB_CRON_RUN,
+            {"job_id": job_id, "result": result},
+        )
         self._write_event(event)
 
     def log_hub_trigger_fired(
@@ -783,10 +606,6 @@ class AuditLogger:
             else:
                 redacted[key] = value
         return redacted
-
-    def close(self) -> None:
-        """Close the audit logger and flush remaining events."""
-        self.flush()
 
 
 # Singleton instance

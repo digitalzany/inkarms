@@ -32,8 +32,6 @@ class SystemPromptConfig(BaseModel):
     boundaries_file: Path | None = None
     user_context_file: Path | None = None
 
-    # Behavior
-    overrides_all: bool = False
 
 
 # =============================================================================
@@ -50,59 +48,6 @@ class ProviderConfig(BaseModel):
     fallback: list[str] = Field(default_factory=list)
     aliases: dict[str, str] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
-
-
-# =============================================================================
-# Deep Thinking Configuration
-# =============================================================================
-
-
-class PromptSuffix(BaseModel):
-    """Prompt suffix for deep thinking steps."""
-
-    text: str = ""
-    enabled: bool = True
-
-
-class DeepThinkingStep(BaseModel):
-    """Single step in deep thinking chain."""
-
-    model: str = "default"
-    context_mode: Literal["full", "answer_only", "custom"] = "full"
-    custom_template: str | None = None
-    prompt_suffix: PromptSuffix = Field(default_factory=PromptSuffix)
-    temperature: float = Field(default=0.7, ge=0.0, le=2.0)
-    max_tokens: int | None = None
-    enabled: bool = True
-
-
-class DeepThinkingConfig(BaseModel):
-    """Deep thinking chain configuration."""
-
-    model_config = ConfigDict(extra="allow")
-
-    enable: bool = True
-    cost_warning: bool = True
-    max_steps: int = Field(default=10, ge=2, le=10)
-    steps: list[DeepThinkingStep] = Field(default_factory=list)
-
-
-# =============================================================================
-# Task Routing Configuration
-# =============================================================================
-
-
-class TaskRoutingConfig(BaseModel):
-    """Task routing and classification configuration."""
-
-    model_config = ConfigDict(extra="allow")
-
-    enable: bool = True
-    classification_method: Literal["heuristic", "llm", "explicit_only"] = "heuristic"
-    confidence_threshold: float = Field(default=0.80, ge=0.0, le=1.0)
-    classifier_model: str | None = None
-    categories: dict[str, str] = Field(default_factory=dict)
-    heuristics: dict[str, list[str]] = Field(default_factory=dict)
 
 
 # =============================================================================
@@ -349,8 +294,8 @@ class UIConfig(BaseModel):
 
     model_config = ConfigDict(extra="allow")
 
-    # Backend selection: "auto", "rich", "textual"
-    backend: Literal["auto", "rich", "textual"] = "auto"
+    # Backend selection: "auto" or "rich"
+    backend: Literal["auto", "rich"] = "auto"
 
     # Display settings
     theme: str = "default"
@@ -723,8 +668,6 @@ class Config(BaseModel):
     providers: ProviderConfig = Field(default_factory=ProviderConfig)
     tools: ToolsConfig = Field(default_factory=ToolsConfig)
     agent: AgentConfigSchema = Field(default_factory=AgentConfigSchema)
-    deep_thinking: DeepThinkingConfig = Field(default_factory=DeepThinkingConfig)
-    task_routing: TaskRoutingConfig = Field(default_factory=TaskRoutingConfig)
     context: ContextConfig = Field(default_factory=ContextConfig)
     security: SecurityConfig = Field(default_factory=SecurityConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)

@@ -190,19 +190,11 @@ Next steps shown on success screen:
 
 ## Backend Selection
 
-InkArms supports multiple UI backends:
-
-| Backend | Description | Dependencies |
-|---------|-------------|-------------|
-| **Rich** (default) | Rich + prompt_toolkit | Included in base install |
-| **Textual** (optional) | Textual framework | `pip install inkarms[textual]` |
-
-Select the backend via CLI flag or config:
+InkArms uses the **Rich** backend (Rich + prompt_toolkit), included in the base install. Select it explicitly if needed:
 
 ```bash
 # Via CLI flag
 inkarms --ui rich
-inkarms --ui textual
 
 # Via explicit ui command
 inkarms ui --backend rich
@@ -210,10 +202,10 @@ inkarms ui --backend rich
 # Via config
 # ~/.inkarms/config.yaml
 ui:
-  backend: "auto"  # auto | rich | textual
+  backend: "auto"  # auto | rich
 ```
 
-In `auto` mode (default), InkArms prefers Rich and falls back to Textual if available.
+In `auto` mode (default), InkArms uses Rich.
 
 ## Command Reference
 
@@ -223,13 +215,11 @@ In `auto` mode (default), InkArms prefers Rich and falls back to Textual if avai
 inkarms [OPTIONS]
 
 Options:
-  --ui [auto|rich|textual]  UI backend to use [default: auto]
-  -V, --version             Show version
-  -v, --verbose             Enable verbose output
-  -q, --quiet               Minimal output
-  -p, --profile TEXT        Use specific config profile
-  --no-color                Disable colored output
-  --help                    Show this message and exit
+  --ui [auto|rich]  UI backend to use [default: auto]
+  -V, --version     Show version
+  -p, --profile     Use specific config profile
+  --no-color        Disable colored output
+  --help            Show this message and exit
 ```
 
 ### Launch UI (Explicit)
@@ -238,8 +228,8 @@ Options:
 inkarms ui [OPTIONS]
 
 Options:
-  -b, --backend [auto|rich|textual]  UI backend [default: auto]
-  --help                             Show this message and exit
+  -b, --backend [auto|rich]  UI backend [default: auto]
+  --help                     Show this message and exit
 ```
 
 ### Config Init Command
@@ -266,7 +256,7 @@ Configure in `~/.inkarms/config.yaml`:
 
 ```yaml
 ui:
-  backend: "auto"         # auto | rich | textual
+  backend: "auto"         # auto | rich
   theme: "default"        # Theme name
   show_status_bar: true   # Show status bar in chat
   show_timestamps: true   # Show message timestamps
@@ -307,15 +297,6 @@ inkarms
 1. Check terminal supports 256 colors: `echo $TERM`
 2. Try: `export TERM=xterm-256color`
 3. Use `--no-color` flag for plain output
-
-### Trying Textual Backend
-
-**Issue:** Want to try the Textual backend
-
-**Solutions:**
-1. Install: `pip install inkarms[textual]`
-2. Launch: `inkarms --ui textual`
-3. Note: Textual backend is not yet fully implemented; use Rich (default) for production use
 
 ### OAuth Not Working (GitHub Copilot)
 

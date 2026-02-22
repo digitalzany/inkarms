@@ -104,7 +104,8 @@ class FallbackHandler:
         )
         logger.warning(f"Provider {provider} failed with {failure_type.value}: {error}")
 
-    def mark_success(self, provider: str) -> None:
+    @staticmethod
+    def mark_success(provider: str) -> None:
         """
         Mark provider as successful (for logging/metrics).
 

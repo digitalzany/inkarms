@@ -10,7 +10,7 @@ from inkarms.models.platforms import (
     PlatformCapabilities,
     PlatformType,
     PlatformUser,
-    StreamChunk,
+    PlatformStreamChunk,
 )
 from inkarms.platforms.adapters.protocol import PlatformAdapter
 from inkarms.platforms.rate_limiter import RateLimiter
@@ -36,7 +36,7 @@ class MockAdapter(PlatformAdapter):
         self._stopped = False
         self._messages_queue: list[IncomingMessage] = []
         self._sent_messages: list[tuple[str, OutgoingMessage]] = []
-        self._streaming_chunks: list[tuple[str, StreamChunk]] = []
+        self._streaming_chunks: list[tuple[str, PlatformStreamChunk]] = []
         self._typing_indicators: list[str] = []
 
     @property
@@ -71,7 +71,7 @@ class MockAdapter(PlatformAdapter):
     async def send_streaming_chunk(
         self,
         destination_id: str,
-        chunk: StreamChunk,
+        chunk: PlatformStreamChunk,
         message_id: str | None = None,
     ) -> str:
         """Mock send streaming chunk."""
@@ -572,7 +572,7 @@ class TestMockAdapter:
         """Test sending streaming chunk."""
         adapter = MockAdapter(PlatformType.TELEGRAM)
 
-        chunk = StreamChunk(content="Partial", is_final=False)
+        chunk = PlatformStreamChunk(content="Partial", is_final=False)
 
         message_id = await adapter.send_streaming_chunk("channel_123", chunk)
 

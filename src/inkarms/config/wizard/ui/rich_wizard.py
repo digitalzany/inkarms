@@ -1,17 +1,11 @@
-"""
-Rich/Textual UI implementation for the configuration wizard.
+from typing import TYPE_CHECKING, Any
 
-This module implements the wizard UI using the native RichBackend primitives
-(get_selection, get_text_input, etc.) to ensure seamless integration.
-"""
-
-from typing import TYPE_CHECKING, Any, Dict, List, Tuple
+from inkarms.config.providers import get_model_choices, get_provider_choices
 from inkarms.config.wizard.core import (
     WizardState,
-    save_wizard_config,
     load_wizard_definition,
+    save_wizard_config,
 )
-from inkarms.config.providers import get_provider_choices, get_model_choices
 from inkarms.secrets.manager import DecryptionError
 
 if TYPE_CHECKING:
@@ -19,7 +13,7 @@ if TYPE_CHECKING:
 
 
 class RichWizard:
-    """Native Rich/Textual UI configuration wizard."""
+    """Rich UI configuration wizard."""
 
     def __init__(self, backend: "RichBackend"):
         self.backend = backend
@@ -29,11 +23,11 @@ class RichWizard:
         # Load existing config if available
         self.state.load_existing_config()
 
-    def _get_step_def(self, step_key: str) -> Dict[str, Any]:
+    def _get_step_def(self, step_key: str) -> dict[str, Any]:
         """Get step definition from loaded config or defaults."""
         return self.config_def.get("steps", {}).get(step_key, {})
 
-    def _get_options(self, step_key: str) -> List[Tuple[str, str, str]]:
+    def _get_options(self, step_key: str) -> list[tuple[str, str, str]]:
         """Get formatted options tuple list for a step."""
         step = self._get_step_def(step_key)
         options = step.get("options", [])
@@ -192,10 +186,10 @@ class RichWizard:
             self.backend.display_info(f"Configuration saved to {config_path}")
 
             # Update backend status immediately
-            self.backend._status.provider = self.state.provider
-            self.backend._status.model = self.state.model
-            self.backend._status.api_key_set = bool(self.state.api_key)
-            self.backend._configured = True
+            self.backend.status.provider = self.state.provider
+            self.backend.status.model = self.state.model
+            self.backend.status.api_key_set = bool(self.state.api_key)
+            self.backend.is_configured = True
 
             return True
 

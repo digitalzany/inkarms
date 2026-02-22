@@ -9,16 +9,7 @@ from inkarms.ui.protocol import UIBackend, UIConfig
 
 logger = logging.getLogger(__name__)
 
-UIBackendType = Literal["auto", "rich", "textual"]
-
-
-def _is_textual_available() -> bool:
-    """Check if Textual is installed."""
-    try:
-        import textual
-        return True
-    except ImportError:
-        return False
+UIBackendType = Literal["auto", "rich"]
 
 
 def _is_rich_available() -> bool:
@@ -38,7 +29,7 @@ def get_ui_backend(
     """Get UI backend based on type and availability.
 
     Args:
-        backend_type: "auto", "rich", or "textual"
+        backend_type: "auto" or "rich"
         config: Optional UI configuration
 
     Returns:
@@ -47,16 +38,7 @@ def get_ui_backend(
     Raises:
         ImportError: If required dependencies are not installed
     """
-
     config = config or UIConfig()
-
-    if backend_type == "textual":
-        if not _is_textual_available():
-            raise ImportError(
-                "Textual is not installed. Install with: pip install inkarms[textual]"
-            )
-        from inkarms.ui.backends.textual_backend.backend import TextualBackend
-        return TextualBackend(config)
 
     if backend_type in ("rich", "auto"):
         if not _is_rich_available():
@@ -67,13 +49,3 @@ def get_ui_backend(
         return RichBackend(config)
 
     raise ValueError(f"Unknown backend type: {backend_type}")
-
-
-def get_available_backends() -> list[str]:
-    """Get list of available UI backends."""
-    backends = []
-    if _is_rich_available():
-        backends.append("rich")
-    if _is_textual_available():
-        backends.append("textual")
-    return backends

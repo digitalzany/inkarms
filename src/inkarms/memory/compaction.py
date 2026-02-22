@@ -269,7 +269,7 @@ class CompactionOrchestrator:
         self._tracker = tracker
         self._strategy = strategy
         self._preserve_recent = preserve_recent
-        self._summary_model = summary_model
+        self.summary_model = summary_model
         self._summary_max_tokens = summary_max_tokens
 
     def should_compact(self, session: Session) -> bool:
@@ -292,7 +292,7 @@ class CompactionOrchestrator:
         compactor = get_compactor(
             strategy or self._strategy,
             preserve_recent=self._preserve_recent,
-            summary_model=self._summary_model,
+            summary_model=self.summary_model,
             summary_max_tokens=self._summary_max_tokens,
         )
         return await compactor.compact(session, target_tokens)

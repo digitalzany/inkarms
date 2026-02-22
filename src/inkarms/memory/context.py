@@ -27,7 +27,8 @@ class TokenCounter:
         self.model = model
         self._encoding = self._get_encoding(model)
 
-    def _get_encoding(self, model: str | None) -> tiktoken.Encoding:
+    @staticmethod
+    def _get_encoding(model: str | None) -> tiktoken.Encoding:
         """Get the appropriate encoding for a model.
 
         Args:
@@ -117,7 +118,8 @@ class ContextTracker:
         # Track system prompt separately
         self._system_prompt_tokens = 0
 
-    def _get_context_window(self, model: str) -> int:
+    @staticmethod
+    def _get_context_window(model: str) -> int:
         """Get context window size for a model.
 
         Args:
@@ -235,45 +237,3 @@ class ContextTracker:
         """
         return self.usage
 
-    def estimate_message_tokens(self, content: str, role: str = "user") -> int:
-        """Estimate tokens for a message.
-
-        Args:
-            content: Message content.
-            role: Message role.
-
-        Returns:
-            Estimated token count including overhead.
-        """
-        return self.counter.count(content) + 4  # Message overhead
-
-    def can_fit(self, tokens: int) -> bool:
-        """Check if additional tokens can fit.
-
-        Args:
-            tokens: Number of tokens to add.
-
-        Returns:
-            True if they fit within handoff threshold.
-        """
-        projected = self.usage.current_tokens + tokens
-        projected_percent = projected / self.max_tokens
-        return projected_percent < self.usage.handoff_threshold
-
-    def tokens_until_compact(self) -> int:
-        """Get tokens remaining until compaction threshold.
-
-        Returns:
-            Number of tokens until compaction is triggered.
-        """
-        compact_limit = int(self.max_tokens * self.usage.compact_threshold)
-        return max(0, compact_limit - self.usage.current_tokens)
-
-    def tokens_until_handoff(self) -> int:
-        """Get tokens remaining until handoff threshold.
-
-        Returns:
-            Number of tokens until handoff is triggered.
-        """
-        handoff_limit = int(self.max_tokens * self.usage.handoff_threshold)
-        return max(0, handoff_limit - self.usage.current_tokens)

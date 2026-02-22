@@ -8,7 +8,7 @@ InkArms loads configuration from multiple sources, in this order (later override
 
 ```
 +----------------------------------+  Priority: HIGHEST
-|   CLI Flags                      |  --model, --task, --profile
+|   CLI Flags                      |  --model, --profile, --tool-approval
 +----------------------------------+
               |
               v
@@ -69,9 +69,6 @@ system_prompt:
   # boundaries_file: "~/.inkarms/prompts/BOUNDARIES.md"
   # user_context_file: "~/.inkarms/prompts/CONTEXT.md"
 
-  # If true, completely replace the model's default system prompt
-  overrides_all: false
-
 # =============================================================================
 # PROVIDERS
 # =============================================================================
@@ -96,59 +93,6 @@ providers:
   secrets:
     openai: "~/.inkarms/secrets/openai.enc"
     anthropic: "~/.inkarms/secrets/anthropic.enc"
-
-# =============================================================================
-# DEEP THINKING
-# =============================================================================
-deep_thinking:
-  enable: true
-  cost_warning: true  # Show cost estimate before running
-
-  steps:
-    - model: "default"
-      context_mode: "full"  # full | answer_only | custom
-      prompt_suffix:
-        text: "Analyze thoroughly. Identify edge cases."
-        enabled: true
-
-    - model: "anthropic/claude-opus-4-20250514"
-      context_mode: "answer_only"
-      prompt_suffix:
-        text: "Critique the previous analysis."
-        enabled: true
-
-    - model: "openai/gpt-4"
-      context_mode: "full"
-      prompt_suffix:
-        text: "Synthesize the best recommendations."
-        enabled: true
-
-# =============================================================================
-# TASK ROUTING
-# =============================================================================
-task_routing:
-  enable: true
-  classification_method: "heuristic"  # heuristic | llm | explicit_only
-  confidence_threshold: 0.80
-
-  # Map task types to models
-  categories:
-    coding: "anthropic/claude-opus-4-20250514"
-    image: "google/gemini-2.0-flash"
-    consulting: "google/gemini-2.0-flash"
-    data_analysis: "openai/gpt-4"
-    documentation: "anthropic/claude-sonnet-4-20250514"
-    default: "anthropic/claude-sonnet-4-20250514"
-
-  # Keyword patterns for heuristic classification
-  heuristics:
-    coding:
-      - "debug|fix|code|function|class|error|bug|implement"
-      - "python|javascript|typescript|rust|go"
-    image:
-      - "generate|create|draw|image|picture|diagram"
-    consulting:
-      - "strategy|market|analysis|business|plan|advise"
 
 # =============================================================================
 # CONTEXT MANAGEMENT
@@ -196,14 +140,25 @@ security:
     - "npm"
     - "node"
 
-  # Blocked patterns (blacklist mode)
+  # Blocked patterns (blacklist mode — default)
   blacklist:
-    - "rm -rf"
-    - "sudo"
-    - "chmod"
-    - "chown"
-    - "curl | bash"
-    - "wget | bash"
+    single_word_commands:
+      - "sudo"
+      - "su"
+      - "dd"
+      - "chmod"
+      - "chown"
+    multi_word_patterns:
+      - "rm -rf"
+      - "curl | bash"
+      - "wget | bash"
+      - "bash -c"
+    sensitive_paths:
+      - "/etc/shadow"
+      - "/etc/sudoers"
+      - "~/.ssh"
+    dangerous_redirects:
+      - "> /dev/sd"
 
   # Path restrictions
   restricted_paths:
@@ -245,8 +200,8 @@ skills:
 # UI
 # =============================================================================
 ui:
-  # Backend selection (auto prefers Rich, falls back to Textual)
-  backend: "auto"  # auto | rich | textual
+  # Backend selection
+  backend: "auto"  # auto | rich
 
   # Theme
   theme: "default"
@@ -259,20 +214,6 @@ ui:
   # Input options
   enable_mouse: true
   enable_completion: true
-
-# Legacy TUI config (still recognized for backward compatibility)
-# tui:
-#   enable: true
-#   theme: "dark"
-#   keybindings: "default"
-#   chat:
-#     show_timestamps: true
-#     show_token_count: true
-#     show_cost: true
-#   status_bar:
-#     show_model: true
-#     show_context_usage: true
-#     show_session_cost: true
 
 # =============================================================================
 # COST TRACKING
@@ -343,11 +284,11 @@ general:
 Use profiles:
 
 ```bash
-# Temporarily
+# Use temporarily for a single command
 inkarms run "Query" --profile dev
 
-# Set as default
-inkarms profile use dev --default
+# Set as default in global config
+inkarms config set general.default_profile dev
 ```
 
 ## Project Configuration
@@ -373,12 +314,6 @@ security:
 # Use - prefix to REMOVE from global lists
 # -whitelist:
 #   - "rm"
-
-# Define project-specific routing
-task_routing:
-  +heuristics:
-    frontend:
-      - "react|vue|angular|css|html"
 ```
 
 ## CLI Config Commands

@@ -4,7 +4,7 @@ import pytest
 from unittest.mock import AsyncMock, Mock, patch
 
 from inkarms.models.agent import AgentEvent, EventType
-from inkarms.models.platforms import PlatformType, StreamChunk
+from inkarms.models.platforms import PlatformType, PlatformStreamChunk
 from inkarms.platforms.processor import MessageProcessor, ProcessedResponse
 from inkarms.providers import (
     AuthenticationError,

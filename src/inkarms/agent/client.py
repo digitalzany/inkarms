@@ -45,7 +45,7 @@ class AIClient:
         use_streaming = self.stream_callback is not None
 
         # Normalize provider-required fields (e.g. reasoning_content for reasoning models)
-        messages = self.provider_manager._normalize_reasoning_content(resolved_model, messages)
+        messages = self.provider_manager.normalize_reasoning_content(resolved_model, messages)
 
         request_kwargs: dict[str, Any] = {
             "model": resolved_model,

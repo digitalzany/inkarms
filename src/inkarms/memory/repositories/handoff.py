@@ -41,7 +41,7 @@ class HandoffRepository(JsonFileRepository[HandoffDocument]):
                 for t in handoff.recent_turns
             ],
             "full_context": (
-                self._session_repo._serialize(handoff.full_context)
+                self._session_repo.serialize(handoff.full_context)
                 if handoff.full_context
                 else None
             ),
@@ -63,9 +63,9 @@ class HandoffRepository(JsonFileRepository[HandoffDocument]):
 
         # Sort by filename (timestamp) and get most recent
         latest = sorted(handoffs, reverse=True)[0]
-        return self._load_file(latest)
+        return self.load_by_path(latest)
 
-    def _load_file(self, path: Path) -> HandoffDocument | None:
+    def load_by_path(self, path: Path) -> HandoffDocument | None:
         """Load a handoff from a file."""
         data = self._load_json(path)
         if not data:
@@ -82,7 +82,7 @@ class HandoffRepository(JsonFileRepository[HandoffDocument]):
             # Parse full context if present
             full_context = None
             if data.get("full_context"):
-                full_context = self._session_repo._deserialize(data["full_context"])
+                full_context = self._session_repo.deserialize(data["full_context"])
 
             return HandoffDocument(
                 id=data.get("id", path.stem),
@@ -132,7 +132,7 @@ class HandoffRepository(JsonFileRepository[HandoffDocument]):
 
         for path in sorted(paths, reverse=True):
             try:
-                handoff = self._load_file(path)
+                handoff = self.load_by_path(path)
                 if handoff:
                     entries.append(
                         MemoryEntry(

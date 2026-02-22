@@ -8,7 +8,7 @@ from inkarms.models.platforms import (
     PlatformCapabilities,
     PlatformType,
     PlatformUser,
-    StreamChunk,
+    PlatformStreamChunk,
 )
 
 
@@ -200,12 +200,12 @@ class TestOutgoingMessage:
         assert msg.metadata == {}
 
 
-class TestStreamChunk:
-    """Tests for StreamChunk model."""
+class TestPlatformStreamChunk:
+    """Tests for PlatformStreamChunk model."""
 
     def test_create_chunk(self):
         """Test creating a stream chunk."""
-        chunk = StreamChunk(
+        chunk = PlatformStreamChunk(
             content="Partial response...",
             is_final=False,
         )
@@ -215,7 +215,7 @@ class TestStreamChunk:
 
     def test_final_chunk(self):
         """Test creating a final chunk."""
-        chunk = StreamChunk(
+        chunk = PlatformStreamChunk(
             content="Complete response.",
             is_final=True,
         )
@@ -225,7 +225,7 @@ class TestStreamChunk:
 
     def test_chunk_defaults(self):
         """Test chunk with default values."""
-        chunk = StreamChunk(content="Text")
+        chunk = PlatformStreamChunk(content="Text")
 
         assert chunk.content == "Text"
         assert chunk.is_final is False

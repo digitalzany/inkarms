@@ -1,10 +1,3 @@
-"""
-Sandbox executor for safe command execution.
-
-This module provides sandboxed command execution with path restrictions,
-command filtering, and audit logging integration.
-"""
-
 import os
 import shlex
 import subprocess
@@ -90,7 +83,8 @@ class PathRestrictions:
 
         return True, None
 
-    def extract_paths_from_command(self, command: str) -> list[Path]:
+    @staticmethod
+    def extract_paths_from_command(command: str) -> list[Path]:
         """
         Extract file paths from a command string.
 

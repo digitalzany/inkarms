@@ -1,5 +1,3 @@
-"""Message router service for multi-platform messaging."""
-
 from __future__ import annotations
 
 import asyncio
@@ -10,8 +8,8 @@ from inkarms.commands import CommandContext, CommandRegistry
 from inkarms.models.platforms import (
     IncomingMessage,
     OutgoingMessage,
+    PlatformStreamChunk,
     PlatformUser,
-    StreamChunk,
 )
 from inkarms.platforms.adapters.protocol import PlatformAdapter
 from inkarms.platforms.processor import MessageProcessor
@@ -234,7 +232,7 @@ class MessageRouter:
                     )
             except ImportError:
                 pass  # hub extras not installed — CLI mode
-            except Exception as _e:  # noqa: BLE001
+            except Exception as _e:
                 logger.debug("session_index upsert skipped: %s", _e)
 
     async def _process_streaming(
@@ -287,7 +285,7 @@ class MessageRouter:
 
             # Send full accumulated text (plus current status) to adapter
             # Create a new chunk object because adapter might expect one
-            display_chunk = StreamChunk(
+            display_chunk = PlatformStreamChunk(
                 content=display_text, is_final=chunk.is_final, metadata=chunk.metadata
             )
 
@@ -371,6 +369,10 @@ class MessageRouter:
         if session_id:
             session_mgr = self._session_store.get_manager(session_id)
 
+        # Handle /compact — compact the current session's context
+        if command == "/compact":
+            return await self._handle_compact_session(session_mgr)
+
         # Build command context
         ctx = self._build_command_context(session_mgr)
 
@@ -405,6 +407,20 @@ class MessageRouter:
         self._session_store.get_manager(new_session_id)
 
         return f"New session started: {new_session_id[:16]}..."
+
+    @staticmethod
+    async def _handle_compact_session(session_mgr) -> str:
+        """Compact the current session's context on demand."""
+        if not session_mgr:
+            return "No active session to compact."
+        # if not session_mgr.should_compact():
+        #     usage = session_mgr.get_context_usage()
+        #     pct = int(usage.usage_percent * 100)
+        #     return f"Context is at {pct}% — compaction not needed yet (threshold: 70%)."
+        await session_mgr.compact()
+        usage = session_mgr.get_context_usage()
+        pct = int(usage.usage_percent * 100)
+        return f"Session compacted. Context now at {pct}%."
 
     def _build_command_context(
         self,

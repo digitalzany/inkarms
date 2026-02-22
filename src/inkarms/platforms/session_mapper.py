@@ -304,7 +304,8 @@ class SessionMapper:
 
     # --- Chain helpers ---
 
-    def _to_channel_identifier(self, platform: str, channel_id: str) -> str:
+    @staticmethod
+    def _to_channel_identifier(platform: str, channel_id: str) -> str:
         """Build a channel identifier for chain matching.
 
         Channel identifiers in config use formats like:
@@ -388,7 +389,8 @@ class SessionMapper:
 
     # --- Internal helpers ---
 
-    def _make_key(self, platform: PlatformType, identifier: str) -> str:
+    @staticmethod
+    def _make_key(platform: PlatformType, identifier: str) -> str:
         """Create a unique key for a platform channel.
 
         Args:
@@ -400,7 +402,8 @@ class SessionMapper:
         """
         return f"{platform.value}:{identifier}"
 
-    def _generate_session_id(self, platform: PlatformType, identifier: str) -> str:
+    @staticmethod
+    def _generate_session_id(platform: PlatformType, identifier: str) -> str:
         """Generate a session ID for a channel.
 
         Args:

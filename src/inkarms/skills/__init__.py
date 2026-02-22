@@ -5,24 +5,8 @@ Skills are portable instruction sets that teach InkArms how to handle specific t
 A skill consists of:
 - SKILL.md: Natural language instructions for the AI
 - skill.yaml: Metadata, keywords, and permissions
-
-Usage:
-    from inkarms.skills import SkillManager, get_skill_manager
-
-    # Get the skill manager
-    manager = get_skill_manager()
-
-    # Load a skill by name
-    skill = manager.get_skill("security-scan")
-
-    # Search for skills
-    results = manager.search("code review")
-
-    # Get skills relevant to a query (for auto-discovery)
-    skills = manager.get_skills_for_query("review this code for security issues")
 """
 
-# Models
 from inkarms.models.skills import (
     FilesystemPermissions,
     Skill,
@@ -33,7 +17,6 @@ from inkarms.models.skills import (
     SkillPermissions,
 )
 
-# Parser
 from inkarms.skills.parser import (
     SkillParseError,
     SkillValidationError,
@@ -44,7 +27,6 @@ from inkarms.skills.parser import (
     validate_skill_directory,
 )
 
-# Loader
 from inkarms.skills.loader import (
     SkillNotFoundError,
     discover_all_skills,
@@ -57,7 +39,6 @@ from inkarms.skills.loader import (
     skill_exists,
 )
 
-# Index
 from inkarms.skills.index import (
     get_index_path,
     get_skills_for_query,
@@ -69,7 +50,6 @@ from inkarms.skills.index import (
     update_index_entry,
 )
 
-# Manager
 from inkarms.skills.manager import (
     SkillManager,
     get_skill_manager,

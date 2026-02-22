@@ -3,8 +3,7 @@ inkarms platforms - Manage multi-platform messaging.
 
 Usage:
     inkarms platforms list
-    inkarms platforms start [--platform PLATFORM]
-    inkarms platforms stop [--platform PLATFORM]
+    inkarms platforms start [--platform PLATFORM] (ctrl+C to stop)
     inkarms platforms status
 """
 
@@ -229,27 +228,6 @@ def start(
     except Exception as e:
         console.print(f"[red]Error: {e}[/red]")
         raise typer.Exit(1)
-
-
-@app.command()
-def stop(
-    platform: Annotated[
-        str | None,
-        typer.Option(
-            "--platform",
-            "-p",
-            help="Stop specific platform",
-        ),
-    ] = None,
-) -> None:
-    """Stop platform message service.
-
-    Note: Currently platforms must be stopped with Ctrl+C.
-    This command is a placeholder for future daemon support.
-    """
-    console.print("[yellow]Platforms are currently run in foreground mode.[/yellow]")
-    console.print("[dim]Use Ctrl+C to stop the running service.[/dim]")
-    console.print("[dim]Future: Support for background daemon mode[/dim]")
 
 
 @app.command()

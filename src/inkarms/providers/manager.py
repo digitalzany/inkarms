@@ -118,13 +118,13 @@ class ProviderManager:
         return [msg.to_dict() for msg in messages]
 
     @staticmethod
-    def _normalize_reasoning_content(
+    def normalize_reasoning_content(
         model: str, messages: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
         """Ensure all assistant messages have reasoning_content for models that require it.
 
         Uses litellm.supports_reasoning() to detect capability — no provider names hardcoded.
-        Injects empty string for messages that predate this feature (backward compat).
+        Injects empty string for messages that predate this feature.
         """
         try:
             from litellm import supports_reasoning
@@ -176,7 +176,7 @@ class ProviderManager:
 
         # Convert messages and normalize provider-required fields
         litellm_messages = self._to_litellm_messages(messages)
-        litellm_messages = self._normalize_reasoning_content(resolved_model, litellm_messages)
+        litellm_messages = self.normalize_reasoning_content(resolved_model, litellm_messages)
 
         # Build request kwargs
         request_kwargs: dict[str, Any] = {
@@ -372,7 +372,6 @@ class ProviderManager:
         self,
         provider: str,
         *,
-        persist: bool = False,
         test: bool = True,
     ) -> None:
         """
@@ -380,7 +379,6 @@ class ProviderManager:
 
         Args:
             provider: New provider/model to use.
-            persist: If True, update config file (not implemented yet).
             test: If True, test the connection first.
 
         Raises:
@@ -405,10 +403,6 @@ class ProviderManager:
         # Update session default
         self._session_default = resolved
         logger.info(f"Switched provider to: {resolved}")
-
-        if persist:
-            # TODO: Implement config file update
-            logger.warning("Persistent provider switch not yet implemented")
 
     async def health_check(
         self,

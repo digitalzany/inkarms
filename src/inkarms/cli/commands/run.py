@@ -4,9 +4,8 @@ inkarms run - Execute queries against the AI.
 Usage:
     inkarms run "Your query here"
     inkarms run "Query" --model claude-opus
-    inkarms run "Query" --task coding
     inkarms run "Query" --skill security-scan
-    inkarms run "Query" --deep
+    inkarms run "Query" --tools
 """
 
 import asyncio
@@ -23,6 +22,7 @@ from rich.panel import Panel
 from inkarms.agent import AgentConfig, AgentLoop, ApprovalMode
 from inkarms.config import get_config
 from inkarms.memory import get_session_manager, reset_session_manager
+from inkarms.platforms.context import ContextBuilder
 from inkarms.providers import (
     AllProvidersFailedError,
     AuthenticationError,
@@ -48,25 +48,6 @@ app = typer.Typer(
 
 console = Console()
 
-
-def _build_skill_prompt(skills: list[Skill]) -> str:
-    """Build the skill injection for the system prompt.
-
-    Args:
-        skills: List of skills to inject.
-
-    Returns:
-        Combined skill instructions.
-    """
-    if not skills:
-        return ""
-
-    parts = ["# Active Skills\n"]
-    for skill in skills:
-        parts.append(skill.get_system_prompt_injection())
-        parts.append("\n---\n")
-
-    return "\n".join(parts)
 
 
 async def _run_with_tools(
@@ -107,7 +88,7 @@ async def _run_with_tools(
 
     # Define approval callback for manual mode
     def approval_callback(tool_call, tool):
-        console.print(f"\n[yellow]Tool Approval Request:[/yellow]")
+        console.print("\n[yellow]Tool Approval Request:[/yellow]")
         console.print(f"  Tool: [bold]{tool.name}[/bold]")
         console.print(f"  Dangerous: {tool.is_dangerous}")
         console.print(f"  Input: {tool_call.input}")
@@ -127,26 +108,16 @@ async def _run_with_tools(
     # Build messages
     messages: list[Message] = []
 
-    # Build system prompt with skills
-    system_parts = []
-    if config.system_prompt.personality:
-        system_parts.append(config.system_prompt.personality)
-
-    if skills:
-        skill_prompt = _build_skill_prompt(skills)
-        if skill_prompt:
-            system_parts.append(skill_prompt)
-
-    # Add tool use instruction
-    system_parts.append(
+    # Build system prompt with skills + tool instruction
+    context_builder = ContextBuilder(config)
+    base_prompt = context_builder.build_system_prompt(skills or [])
+    tool_instruction = (
         "You have access to tools that allow you to execute commands, "
         "read/write files, and search for information. "
         "Use these tools when they can help answer the user's query."
     )
-
-    system_prompt = "\n\n".join(system_parts) if system_parts else None
-    if system_prompt:
-        messages.append(Message.system(system_prompt))
+    system_prompt = "\n\n".join(filter(None, [base_prompt, tool_instruction]))
+    messages.append(Message.system(system_prompt))
 
     # Add user query
     messages.append(Message.user(query))
@@ -221,22 +192,8 @@ async def _run_completion(
     # Build messages
     messages: list[Message] = []
 
-    # Build system prompt with skills
-    system_parts = []
-
-    # Add personality if configured
     config = get_config()
-    if config.system_prompt.personality:
-        system_parts.append(config.system_prompt.personality)
-
-    # Add skill instructions
-    if skills:
-        skill_prompt = _build_skill_prompt(skills)
-        if skill_prompt:
-            system_parts.append(skill_prompt)
-
-    # Combine into system message
-    system_prompt = "\n\n".join(system_parts) if system_parts else None
+    system_prompt = ContextBuilder(config).build_system_prompt(skills or []) or None
     if system_prompt:
         messages.append(Message.system(system_prompt))
         if session_manager:
@@ -429,14 +386,6 @@ def run_query(
             help="Model to use (name or alias).",
         ),
     ] = None,
-    task: Annotated[
-        str | None,
-        typer.Option(
-            "--task",
-            "-t",
-            help="Task type (coding, consulting, etc.).",
-        ),
-    ] = None,
     skill: Annotated[
         str | None,
         typer.Option(
@@ -450,14 +399,6 @@ def run_query(
         typer.Option(
             "--auto-skill/--no-auto-skill",
             help="Automatically discover relevant skills.",
-        ),
-    ] = False,
-    deep: Annotated[
-        bool,
-        typer.Option(
-            "--deep",
-            "-d",
-            help="Enable deep thinking chain.",
         ),
     ] = False,
     approve: Annotated[
@@ -603,10 +544,8 @@ def run_query(
             Panel(
                 f"[bold]Query:[/bold] {query}\n"
                 f"[bold]Model:[/bold] {model or 'default'}\n"
-                f"[bold]Task:[/bold] {task or 'auto'}\n"
                 f"[bold]Skills:[/bold] {', '.join(skill_names)}\n"
                 f"[bold]Auto-skill:[/bold] {auto_skill}\n"
-                f"[bold]Deep thinking:[/bold] {deep}\n"
                 f"[bold]Stream:[/bold] {stream}\n"
                 f"[bold]Temperature:[/bold] {temperature}\n"
                 f"[bold]Context:[/bold] {ctx_usage.format_status()}\n"
@@ -615,14 +554,6 @@ def run_query(
             )
         )
         return
-
-    # Task routing not yet implemented
-    if task:
-        console.print(
-            f"[yellow]Task routing ({task}) not yet implemented. Using default model.[/yellow]"
-        )
-    if deep:
-        console.print("[yellow]Deep thinking not yet implemented. Coming in Phase 2.[/yellow]")
 
     # Run with tool use or standard completion
     if tools:
