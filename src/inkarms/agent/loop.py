@@ -201,8 +201,11 @@ class AgentLoop:
                 stopped_reason="timeout",
             )
 
-        # Add assistant response to conversation
-        conversation.append({"role": "assistant", "content": response.get("content")})
+        # Add assistant response to conversation (preserve reasoning_content if present)
+        assistant_msg: dict[str, Any] = {"role": "assistant", "content": response.get("content")}
+        if response.get("reasoning_content") is not None:
+            assistant_msg["reasoning_content"] = response["reasoning_content"]
+        conversation.append(assistant_msg)
 
         self._emit_loop_event(EventType.AI_RESPONSE, iteration_idx, "AI response received")
 
@@ -257,7 +260,9 @@ class AgentLoop:
 
         # Replace the assistant message with OpenAI tool_calls format
         text_content = ToolCallParser.extract_text_content(response)
-        conversation[-1] = self._build_tool_call_message(text_content, tool_calls)
+        conversation[-1] = self._build_tool_call_message(
+            text_content, tool_calls, reasoning_content=response.get("reasoning_content")
+        )
 
         # Execute tool calls and track results
         tool_results = await self.tool_executor.execute_batch(tool_calls, iteration_idx)
@@ -280,9 +285,13 @@ class AgentLoop:
         return None  # Continue looping
 
     @staticmethod
-    def _build_tool_call_message(text_content: str, tool_calls: list[ToolCall]) -> dict[str, Any]:
+    def _build_tool_call_message(
+        text_content: str,
+        tool_calls: list[ToolCall],
+        reasoning_content: str | None = None,
+    ) -> dict[str, Any]:
         """Build an assistant message with tool_calls in OpenAI format."""
-        return {
+        msg: dict[str, Any] = {
             "role": "assistant",
             "content": text_content or None,
             "tool_calls": [
@@ -299,6 +308,9 @@ class AgentLoop:
                 for tc in tool_calls
             ],
         }
+        if reasoning_content is not None:
+            msg["reasoning_content"] = reasoning_content
+        return msg
 
     @staticmethod
     def _truncate_output(output: str, max_chars: int = MAX_TOOL_OUTPUT_CHARS) -> str:

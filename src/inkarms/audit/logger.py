@@ -424,6 +424,7 @@ class AuditLogger:
         platform: str = "cli",
         session_id: str | None = None,
         metadata: dict | None = None,
+        model: str | None = None,
     ) -> None:
         """Log a generic query or response.
 
@@ -437,6 +438,8 @@ class AuditLogger:
             data["session_id"] = session_id
         if metadata:
             data["metadata"] = metadata
+        if model:
+            data["model"] = model
 
         event = self._create_event(AuditEventType.QUERY_COMPLETE, data)
         self._write_event(event)
@@ -522,6 +525,7 @@ class AuditLogger:
         session_id: str | None = None,
         tokens: int = 0,
         cost: float = 0.0,
+        model: str | None = None,
     ) -> None:
         """Log a message sent to a platform."""
         data: dict[str, Any] = {
@@ -531,6 +535,9 @@ class AuditLogger:
             "tokens": tokens,
             "cost": cost,
         }
+
+        if model:
+            data["model"] = model
 
         if self.include_responses:
             data["response"] = response

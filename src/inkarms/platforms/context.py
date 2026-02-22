@@ -54,7 +54,11 @@ class ContextBuilder:
         if session_id and session_manager:
             try:
                 for prior_msg in session_manager.get_messages(include_system=False):
-                    messages.append(Message(role=prior_msg["role"], content=prior_msg["content"]))
+                    messages.append(Message(
+                        role=prior_msg["role"],
+                        content=prior_msg["content"],
+                        reasoning_content=prior_msg.get("reasoning_content"),
+                    ))
             except Exception as e:
                 logger.error(f"Failed to load session history: {e}")
 

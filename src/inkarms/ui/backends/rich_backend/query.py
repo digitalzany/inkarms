@@ -69,8 +69,9 @@ class QueryProcessor:
         messages = self._build_messages(query)
         cost_before = self._get_cost_before()
 
-        async def run(loop: asyncio.AbstractEventLoop) -> str:
+        async def run(loop: asyncio.AbstractEventLoop) -> tuple[str, str | None]:
             full_content = ""
+            reasoning_content: str | None = None
             try:
                 stream = await self._provider.complete(
                     messages=messages,
@@ -78,16 +79,20 @@ class QueryProcessor:
                     stream=True,
                 )
                 async for chunk in stream:
-                    full_content += chunk.content
-                    on_chunk(chunk.content)
-                return full_content
+                    if chunk.content:
+                        full_content += chunk.content
+                        on_chunk(chunk.content)
+                    if chunk.reasoning_content is not None:
+                        reasoning_content = chunk.reasoning_content
+                return full_content, reasoning_content
             except Exception as e:
                 traceback.print_exc()
                 raise e
 
-        def on_success(result: str) -> None:
-            self._track_response(result, cost_before)
-            on_complete(result)
+        def on_success(result: tuple[str, str | None]) -> None:
+            content, reasoning = result
+            self._track_response(content, cost_before, reasoning_content=reasoning)
+            on_complete(content)
 
         return self._run_in_thread(run, on_success, on_error)
 
@@ -110,7 +115,7 @@ class QueryProcessor:
 
         self._track_user_message(query)
         messages = self._build_messages(query)
-        msg_dicts = [{"role": m.role, "content": m.content} for m in messages]
+        msg_dicts = [m.to_dict() for m in messages]
         cost_before = self._get_cost_before()
 
         async def run(loop: asyncio.AbstractEventLoop) -> Any:
@@ -190,6 +195,7 @@ class QueryProcessor:
                         response.content,
                         model=response.model,
                         cost=response.cost or 0,
+                        reasoning_content=response.reasoning_content,
                     )
                     if self._on_status_update:
                         self._on_status_update()
@@ -256,7 +262,9 @@ class QueryProcessor:
                 return self._provider.get_cost_summary().total_cost
         return 0.0
 
-    def _track_response(self, content: str, cost_before: float) -> None:
+    def _track_response(
+        self, content: str, cost_before: float, reasoning_content: str | None = None
+    ) -> None:
         """Track an assistant response in session manager with cost delta."""
         if not self._session:
             return
@@ -269,6 +277,7 @@ class QueryProcessor:
                 content,
                 model=self._status.model,
                 cost=cost_delta,
+                reasoning_content=reasoning_content,
             )
             if self._on_status_update:
                 self._on_status_update()
@@ -281,7 +290,11 @@ class QueryProcessor:
 
         if self._session:
             return [
-                Message(role=msg_dict["role"], content=msg_dict["content"])
+                Message(
+                    role=msg_dict["role"],
+                    content=msg_dict["content"],
+                    reasoning_content=msg_dict.get("reasoning_content"),
+                )
                 for msg_dict in self._session.get_messages(include_system=True)
             ]
 
