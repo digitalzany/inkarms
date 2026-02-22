@@ -601,39 +601,16 @@ inkarms tools metrics [TOOL_NAME] [OPTIONS]
 
 ## inkarms platforms
 
-Manage multi-platform messaging adapters.
+Start platform adapters (Telegram, Slack, Discord) as a foreground process. For production use, prefer running platforms through the Hub daemon (`inkarms hub start`), which adds crash recovery, hot-reload, and session persistence.
 
 ```bash
-inkarms platforms [COMMAND]
+inkarms platforms list                          # Show configured platforms and status
+inkarms platforms start                         # Start all enabled platforms (blocks)
+inkarms platforms start --platform telegram     # Start a specific platform
+inkarms platforms status                        # Check platform health
 ```
 
-### inkarms platforms list
-
-List available platforms and their configuration status.
-
-```bash
-inkarms platforms list
-```
-
-### inkarms platforms start
-
-Start platform message service.
-
-```bash
-inkarms platforms start [OPTIONS]
-```
-
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--platform` | `-p` | Start specific platform (telegram, slack, discord) |
-
-### inkarms platforms status
-
-Show platform health status.
-
-```bash
-inkarms platforms status
-```
+→ [Platform Setup Guide](platforms.md)
 
 ---
 

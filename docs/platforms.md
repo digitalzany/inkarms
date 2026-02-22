@@ -4,9 +4,13 @@ This guide will help you set up InkArms to work with various messaging platforms
 
 ---
 
+> **Recommended:** Run platforms through the [Hub daemon](hub.md) for production use. Hub adds crash recovery (auto-restart with backoff), config hot-reload via SIGHUP, session persistence, and a full REST + WebSocket API. Use `inkarms platforms start` for quick local testing only.
+
+---
+
 ## Overview
 
-InkArms supports interaction through multiple messaging platforms, allowing you to chat with your AI assistant from your favorite messaging app. Each platform runs independently using polling or WebSocket connections - **no webhook server required** for personal use.
+InkArms supports interaction through multiple messaging platforms, allowing you to chat with your AI assistant from your favorite messaging app. Each platform runs using polling or WebSocket connections — **no webhook server or static IP required**.
 
 **Supported Platforms:**
 - ✅ **Telegram** - Bot API with long polling

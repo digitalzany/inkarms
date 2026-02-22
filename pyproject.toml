@@ -67,7 +67,7 @@ dev = [
     "pre-commit>=3.6.0",
     "types-PyYAML>=6.0.0",
 ]
-all = ["inkarms[sqlite,platforms,hub,tools,dev]"]
+all = ["inkarms[sqlite,platforms,hub,tools]"]
 
 [project.urls]
 Homepage = "https://github.com/digitalzany/inkarms"

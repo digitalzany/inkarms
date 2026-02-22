@@ -42,8 +42,8 @@ Most AI tools are just chatboxes. They talk a big game but can't *do* anything. 
 | 🧩 **Skills** | Portable `SKILL.md` instruction sets, keyword auto-discovery |
 | 🧠 **Memory** | Context compaction, handoffs, session persistence |
 | 🔌 **Providers** | 100+ models via LiteLLM, fallback chains, per-session cost tracking |
-| 🌐 **Platforms** | Telegram, Slack, Discord — polling/WebSocket, no webhook or static IP needed |
 | 🏠 **Hub** | Always-on daemon: REST + WebSocket API, cron jobs, webhook triggers, OpenAI proxy |
+| 🌐 **Platforms** | Telegram, Slack, Discord via Hub — polling/WebSocket, no webhook or static IP needed |
 | 🛡️ **Security** | Sandbox, blacklist/whitelist, immutable audit log, encrypted secrets |
 
 ---
@@ -53,21 +53,15 @@ Most AI tools are just chatboxes. They talk a big game but can't *do* anything. 
 ### 1. Install
 
 ```bash
-# Core
-pip install inkarms
-
-# With platform support (Telegram, Slack, Discord)
-pip install "inkarms[platforms]"
-
-# Everything
 pip install "inkarms[all]"
 ```
 
-### 2. Initialize and query
+### 2. Initialize
 
 ```bash
 inkarms config init        # Interactive setup wizard (choose provider, API key, security)
-inkarms run "What's in this directory?" --tools   # Let it look around
+inkarms  # runs CLI tool
+inkarms hub start --background  # runs hub with all features in background
 ```
 
 ### 3. Interactive UI
@@ -78,24 +72,21 @@ inkarms    # Full TUI: chat, dashboard, sessions, config wizard
 
 Built with Rich + prompt_toolkit. Streaming responses, tool execution panels, slash commands (`/model`, `/agent`, `/tools`, `/compact`...).
 
-### 4. Connect a messaging platform
+### 4. Hub (daemon) + messangers
+
+Enable the required messenger in your config (~/.inkarms/config.yaml), then:
 
 ```bash
-inkarms config set-secret telegram-bot-token   # Set your token
-inkarms platforms start                         # Start polling
-```
-
-Your agent is now reachable from Telegram. No webhook. No static IP. No excuses.
-
-### 5. Run it as a daemon
-
-```bash
-pip install "inkarms[hub]"
-inkarms hub start --background
-inkarms hub install              # Install as launchd (macOS) or systemd (Linux) service
+inkarms hub start --background                  # Hub auto-starts all enabled platforms
 ```
 
 Now you've got a REST + WebSocket API, scheduled AI jobs, and always-on platform adapters.
+→ [Hub Setup Guide](docs/hub.md)
+
+Your agent is reachable through different messengers: Telegram, Slack, Discord and more coming. No webhook. No static IP. No excuses.
+All configured platforms are available after hub start. Or you can run platforms separately if you don't need hub features.
+
+→ [Platform Setup Guide](docs/platforms.md)
 
 ---
 
@@ -198,7 +189,7 @@ Context is automatically compacted when it hits 70% of the window. Three strateg
 
 ## 🔌 Providers (100+ Models)
 
-InkArms rides LiteLLM, which means you're not locked into anything:
+InkArms rides [LiteLLM](https://github.com/BerriAI/litellm), which means you're not locked into anything:
 
 ```bash
 # One-off model selection
@@ -227,43 +218,6 @@ If OpenAI is down, it falls over to the next provider automatically. Costs are t
 
 ---
 
-## 🌐 Platforms (Telegram, Slack, Discord)
-
-Connect your agent to messaging platforms with zero infrastructure:
-
-```yaml
-# ~/.inkarms/config.yaml
-platforms:
-  enable: true
-
-  telegram:
-    enable: true
-    bot_token: "${TELEGRAM_BOT_TOKEN}"
-    allowed_users: ["123456789"]   # Whitelist by Telegram user ID
-
-  slack:
-    enable: true
-    bot_token: "${SLACK_BOT_TOKEN}"
-    app_token: "${SLACK_APP_TOKEN}"   # Required for Socket Mode
-    allowed_channels: ["C0123456"]
-
-  discord:
-    enable: true
-    bot_token: "${DISCORD_BOT_TOKEN}"
-    allowed_guilds: ["987654321"]
-```
-
-```bash
-inkarms platforms start         # Foreground (Ctrl+C to stop)
-inkarms hub start --background  # Background via Hub (persistent)
-```
-
-All platforms use long polling or WebSocket connections — no webhook endpoint, no static IP, no reverse proxy.
-
-→ [Platform Setup Guide](docs/platforms.md)
-
----
-
 ## 🏠 Hub — Always-On Daemon
 
 Run InkArms as a persistent background service with a full REST + WebSocket API.
@@ -279,8 +233,6 @@ Run InkArms as a persistent background service with a full REST + WebSocket API.
 ```
 
 ```bash
-pip install "inkarms[hub]"
-
 inkarms hub start --background          # Start daemon
 inkarms hub status                      # Running on 127.0.0.1:18750 — uptime=42s
 inkarms hub install                     # Install as system service (auto-start at login)
@@ -302,7 +254,7 @@ inkarms hub key                         # Show API key
 
 Authentication: Bearer token (`Authorization: Bearer <key>`) or `X-InkArms-Key: <key>`. Localhost is trusted by default.
 
-→ [Hub Reference](docs/hub.md) | [Trigger Routes](docs/hub-triggers.md) | [Cron Jobs](docs/hub-cron.md)
+→ [Hub Reference](docs/hub.md) | [Trigger Routes](docs/hub-triggers.md) | [Cron Jobs](docs/hub-cron.md) | [Platform Setup](docs/platforms.md)
 
 ---
 
@@ -322,20 +274,12 @@ Authentication: Bearer token (`Authorization: Bearer <key>`) or `X-InkArms-Key: 
 
 ---
 
-## 🗺️ Roadmap
-
-- [x] **Phase 1: Foundation** — Config, providers, tools, TUI, platforms, Hub, skills, security ✅
-- [ ] **Phase 2: Intelligence** — Skill marketplace, remote skill registry, plugin system 🚧
-- [ ] **Phase 3: Ecosystem** — Team profiles, multi-agent workflows
-
----
-
 ## 🤝 Contributing
 
 ```bash
 git clone https://github.com/digitalzany/inkarms.git
 cd inkarms
-pip install -e ".[dev]"
+pip install -e ".[all]"
 pre-commit install
 pytest   # If the tests pass, you may pass.
 ```

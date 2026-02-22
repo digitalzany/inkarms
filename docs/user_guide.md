@@ -209,8 +209,8 @@ inkarms              # Launch interactive UI (default, no subcommand)
 ├── tools            # Tool management
 ├── memory           # Memory and context
 ├── status           # Health and monitoring
-├── platforms        # Platform messaging (Telegram, Slack, Discord)
-└── hub              # Hub daemon management
+├── hub              # Hub daemon (platforms, API, cron, triggers)
+└── platforms        # Standalone platform adapter (dev/testing)
 ```
 
 ### Global Options
@@ -405,131 +405,11 @@ inkarms memory delete 2026-02-02
 
 ## Multi-Platform Messaging
 
-InkArms can run on multiple messaging platforms, allowing you to interact with your AI assistant from Telegram, Slack, Discord, and more - all without needing a webhook server or public IP address!
+InkArms supports Telegram, Slack, and Discord — polling and WebSocket connections, no webhook or static IP needed.
 
-### Supported Platforms
+The recommended way to run platforms is through the [Hub daemon](../docs/hub.md), which adds crash recovery, hot-reload, session persistence, and REST API access. For setup instructions, token configuration, and platform-specific options, see the full guide:
 
-- **Telegram** - Bot API with long polling
-- **Slack** - Socket Mode (WebSocket)
-- **Discord** - Gateway WebSocket connection
-- More platforms coming soon (WhatsApp, iMessage, Signal, Teams, WeChat)
-
-### Quick Start
-
-1. **Install platform dependencies:**
-   ```bash
-   pip install -e ".[platforms]"
-   ```
-
-2. **Set up your bot** (see [Platform Setup Guide](platforms.md) for detailed instructions):
-   - Telegram: Create bot with @BotFather
-   - Slack: Create app at api.slack.com
-   - Discord: Create app at discord.com/developers
-
-3. **Configure InkArms:**
-   ```yaml
-   # ~/.inkarms/config.yaml
-   platforms:
-     enable: true
-
-     telegram:
-       enable: true
-       bot_token: "${TELEGRAM_BOT_TOKEN}"
-
-     slack:
-       enable: true
-       bot_token: "${SLACK_BOT_TOKEN}"
-       app_token: "${SLACK_APP_TOKEN}"
-
-     discord:
-       enable: true
-       bot_token: "${DISCORD_BOT_TOKEN}"
-   ```
-
-4. **Start your bots:**
-   ```bash
-   # Start all enabled platforms
-   inkarms platforms start
-
-   # Or start specific platform
-   inkarms platforms start --platform telegram
-   ```
-
-5. **Chat with your bot** on your favorite platform!
-
-### Platform Commands
-
-```bash
-# List available platforms and their status
-inkarms platforms list
-
-# Start all enabled platforms
-inkarms platforms start
-
-# Start specific platform
-inkarms platforms start --platform telegram
-inkarms platforms start --platform slack
-inkarms platforms start --platform discord
-
-# Check platform configuration status
-inkarms platforms status
-
-# Stop platforms (Ctrl+C in running terminal)
-```
-
-### Platform Features
-
-All platforms support:
-- ✅ **Streaming responses** - Messages update in real-time
-- ✅ **Markdown formatting** - Rich text with code blocks
-- ✅ **Rate limiting** - Prevents spam (10 messages/minute default)
-- ✅ **User whitelisting** - Restrict access to specific users
-- ✅ **Session persistence** - Maintains conversation context
-- ✅ **Security sandbox** - Safe command execution (future)
-
-### Example Configuration
-
-```yaml
-platforms:
-  enable: true
-
-  # Global settings
-  rate_limit_per_user: 10  # Messages per minute
-  max_concurrent_sessions: 100
-
-  telegram:
-    enable: true
-    bot_token: "${TELEGRAM_BOT_TOKEN}"
-    mode: polling
-    parse_mode: "MarkdownV2"
-    # Optional: restrict to specific users
-    allowed_users: ["123456789"]
-
-  slack:
-    enable: true
-    bot_token: "${SLACK_BOT_TOKEN}"
-    app_token: "${SLACK_APP_TOKEN}"
-    mode: socket
-    # Optional: restrict to specific channels
-    allowed_channels: ["C0123456"]
-
-  discord:
-    enable: true
-    bot_token: "${DISCORD_BOT_TOKEN}"
-    mode: gateway
-    command_prefix: "!"
-    # Optional: restrict to specific servers
-    allowed_guilds: ["987654321"]
-```
-
-### Security Best Practices
-
-1. **Use environment variables** for tokens (never hardcode)
-2. **Enable user/channel whitelists** for production bots
-3. **Monitor audit logs** to see who's using your bot
-4. **Set appropriate rate limits** to prevent abuse
-
-For detailed setup instructions for each platform, see the [Platform Setup Guide](platforms.md).
+→ [Platform Setup Guide](platforms.md)
 
 ## Tips & Tricks
 
