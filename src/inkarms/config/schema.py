@@ -626,6 +626,80 @@ class AgentConfigSchema(BaseModel):
 
 
 # =============================================================================
+# Hub Configuration
+# =============================================================================
+
+
+class HubTriggerRoute(BaseModel):
+    """Webhook trigger route — an HTTP POST fires an AI agent action.
+
+    Named "trigger" (not "pipeline" or "webhook") to distinguish from WebhookConfig
+    (platform webhook server on port 8000) and to match industry convention
+    (GitHub Actions triggers, Zapier triggers).
+    """
+
+    name: str
+    prompt_template: str  # Placeholders: {body.x.y}, {headers.x}, {query.x}
+    session_id: str = "default"
+    reply_to: str | None = None  # "telegram:@user", "slack:#channel", or HTTP URL
+    shared_secret: str | None = None  # If set, verify HMAC-SHA256 of body
+    secret_header: str = "X-Hub-Signature-256"  # Header containing the signature
+
+
+class CronJobConfig(BaseModel):
+    """Scheduled job configuration."""
+
+    id: str
+    schedule: str  # cron expression OR "every 5m", "every 1h"
+    type: Literal["bash", "ai_query"] = "bash"
+    command: str  # bash command (sandboxed) or AI prompt
+    session_id: str = "default"
+    notify: str | None = None
+    enabled: bool = True
+    allowed_tools: list[str] | None = None
+    # For type=ai_query: restrict tool use.
+    # None = no tools (safe default for headless).
+    # Explicit list = only those tools allowed.
+
+
+class HubConfig(BaseModel):
+    """InkArms Hub daemon configuration.
+
+    The hub runs platform adapters as persistent background tasks, exposes a
+    REST + WebSocket API, manages scheduled AI queries, accepts webhook triggers,
+    and optionally proxies OpenAI-compatible requests.
+
+    NOTE: HubConfig.port (default 18750) is the hub API server.
+    WebhookConfig.port (default 8000) is the existing platform webhook server.
+    These are distinct features — do not confuse them.
+
+    WARNING: trust_localhost=True means any local process can access the hub
+    without a key. Set to False on shared systems (VPS, cloud VMs, CI, Docker).
+    """
+
+    enable: bool = False
+    host: str = "127.0.0.1"
+    port: int = 18750
+    api_key_name: str = "hub_api_key"  # Key name in SecretsManager — NOT stored here
+    trust_localhost: bool = True
+    auth_max_failures: int = 20
+    auth_window_seconds: int = 60
+    auth_lockout_seconds: int = 300
+    tool_approval_mode: Literal["auto", "disabled"] = "auto"  # /ws/chat sessions
+    cron_tool_approval_mode: Literal["auto", "disabled"] = "disabled"  # ai_query cron jobs
+    webhook_tool_approval_mode: Literal["auto", "disabled"] = "disabled"  # trigger routes
+    openai_proxy: bool = False
+    cron_jobs: list[CronJobConfig] = Field(default_factory=list)
+    triggers: list[HubTriggerRoute] = Field(default_factory=list)
+    auto_start_platforms: bool = True
+    shutdown_timeout: int = 30  # Seconds to wait for in-flight requests on SIGTERM
+    max_event_subscribers: int = 50  # Max concurrent /ws/events connections
+    ws_ping_interval: int = 30  # Seconds between server-side WS ping frames
+    trigger_max_body_bytes: int = 1_048_576  # 1 MB limit on webhook trigger request body
+    budget_sync_interval: int = 60  # Seconds between in-memory budget flushes to DB
+
+
+# =============================================================================
 # Root Configuration Model
 # =============================================================================
 
@@ -658,6 +732,7 @@ class Config(BaseModel):
     cost: CostConfig = Field(default_factory=CostConfig)
     ui: UIConfig = Field(default_factory=UIConfig)
     platforms: PlatformsConfig = Field(default_factory=PlatformsConfig)
+    hub: HubConfig = Field(default_factory=HubConfig)
     general: GeneralConfig = Field(default_factory=GeneralConfig)
 
     def resolve_model_alias(self, model: str) -> str:

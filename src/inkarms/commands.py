@@ -181,10 +181,10 @@ def _resolve_model_arg(arg: str, current_provider: str) -> tuple[str, str | None
 
 def cmd_model(ctx: CommandContext, arg: str) -> CommandResult:
     """Show or change model. Accepts provider/model or bare model name."""
+    current_provider = ctx.provider or (
+        ctx.model.split("/")[0] if ctx.model and "/" in ctx.model else ""
+    )
     if arg:
-        current_provider = ctx.provider or (
-            ctx.model.split("/")[0] if ctx.model and "/" in ctx.model else ""
-        )
         resolved, error = _resolve_model_arg(arg, current_provider)
         if error:
             return CommandResult(message=f"Invalid model: {error}")
@@ -200,7 +200,7 @@ def cmd_model(ctx: CommandContext, arg: str) -> CommandResult:
     if available:
         preview = available[-5:]
         total = len(available)
-        lines.append(f"\nRecent models (last {len(preview)} of {total}):")
+        lines.append(f"\nAvailable models for provider '{current_provider}' (last {len(preview)} of {total}):")
         for m in preview:
             lines.append(f"  \u2022 {m}")
         lines.append("\nUse /model <model> to change | /models for all")

@@ -239,3 +239,38 @@ general:
 tools:
   web_search:
     brave_api_key: ""
+
+# =============================================================================
+# Hub (Always-On Daemon)
+# =============================================================================
+# Uncomment and configure to enable the always-on hub daemon.
+# Run: inkarms hub start --background
+# Install as service: inkarms hub install
+#
+# NOTE: hub.port (18750) is the hub API. WebhookConfig.port (8000) is the
+# existing platform webhook ingress. These are separate features.
+#
+# hub:
+#   enable: false
+#   host: "127.0.0.1"
+#   port: 18750
+#   api_key_name: "hub_api_key"   # stored via SecretsManager, never here
+#   trust_localhost: true          # WARNING: set false on shared/cloud systems
+#   auto_start_platforms: true     # start Telegram/Slack/Discord adapters on hub start
+#   openai_proxy: false            # expose /v1/chat/completions (for Continue.dev, etc.)
+#   shutdown_timeout: 30
+#
+#   # Scheduled jobs (cron)
+#   cron_jobs: []
+#   #   - id: "daily-summary"
+#   #     schedule: "every 1h"     # or cron expression: "0 9 * * *"
+#   #     type: "bash"             # or "ai_query"
+#   #     command: "date"
+#   #     enabled: true
+#
+#   # Webhook trigger routes
+#   triggers: []
+#   #   - name: "github-pr"
+#   #     prompt_template: "Summarize PR: {body.pull_request.title}"
+#   #     session_id: "github"
+#   #     shared_secret: null      # set to enable HMAC-SHA256 verification

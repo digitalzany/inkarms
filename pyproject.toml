@@ -47,8 +47,13 @@ platforms = [
     "python-telegram-bot>=20.0",
     "slack-sdk>=3.23.0",
     "discord.py>=2.3.0",
-    "fastapi>=0.104.0",  # Optional - only for webhook server
-    "uvicorn>=0.24.0",   # Optional - only for webhook server
+]
+hub = [
+    "fastapi>=0.100",
+    "uvicorn[standard]>=0.20",
+    "aiosqlite>=0.22",          # 0.22 removed daemon=True; use async context manager or explicit close()
+    "apscheduler>=3.10,<4.0",   # v4.0 is a breaking rewrite; revisit when v4 reaches stable
+    "aiofiles>=23.0",
 ]
 tools = [
     "RestrictedPython>=6.2",  # For safe Python code execution
@@ -63,7 +68,7 @@ dev = [
     "pre-commit>=3.6.0",
     "types-PyYAML>=6.0.0",
 ]
-all = ["inkarms[textual,sqlite,platforms,tools,dev]"]
+all = ["inkarms[textual,sqlite,platforms,hub,tools,dev]"]
 
 [project.urls]
 Homepage = "https://github.com/digitalzany/inkarms"
@@ -122,7 +127,8 @@ known-first-party = ["inkarms"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["ARG", "PLR2004", "PLC0415"]
-"src/inkarms/cli/commands/*" = ["ARG001"]  # Placeholder commands have unused args
+"src/inkarms/cli/commands/*" = ["ARG001", "S605", "S607"]  # Placeholder commands have unused args; hub uses os.system for system calls
+"src/inkarms/hub/*" = ["PLC0415", "BLE001"]  # Hub uses lazy imports and broad exception catching for robustness
 "src/inkarms/cli/app.py" = ["PLC0415", "B904", "ARG001"]  # Dynamic imports for lazy loading, typer callback args
 "src/inkarms/audit/logger.py" = ["PLW0603", "PLC0415"]  # Global variable needed for singleton, avoid circular imports
 "src/inkarms/security/whitelist.py" = ["PLR0911"]  # Multiple returns needed for clarity
@@ -153,8 +159,12 @@ module = [
     "discord.*",
     "fastapi.*",
     "uvicorn.*",
+    "aiosqlite.*",
+    "apscheduler.*",
+    "aiofiles.*",
     "inkarms.security.*",
     "inkarms.audit.*",
+    "inkarms.hub.*",
 ]
 ignore_missing_imports = true
 

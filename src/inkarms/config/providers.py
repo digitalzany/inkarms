@@ -108,6 +108,9 @@ def load_providers_config() -> dict[str, ProviderInfo]:
         # Filter out 'models' from kwargs to avoid double passing
         p_kwargs = {k: v for k, v in p_data.items() if k != "models"}
 
+        p_kwargs.setdefault("id", provider_id)
+        p_kwargs.setdefault("name", provider_id.capitalize())
+
         providers[provider_id] = ProviderInfo(models=models, **p_kwargs)
 
     return providers
@@ -268,7 +271,8 @@ def get_model_choices(provider_id: str) -> list[tuple[str, str, str]]:
     """Get a list of models for a provider for selection menus (id, name, description)."""
     providers = _get_providers()
     if provider_id not in providers:
-        return [("default", "Default", "")]
+        # return [("default", "Default", "")]
+        return [(provider_id, "", "")]
 
     return [
         (m.id, m.name, m.description) for m in providers[provider_id].models if not m.deprecated

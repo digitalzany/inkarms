@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import Annotated
 
 import typer
@@ -23,6 +22,7 @@ from inkarms.audit import get_audit_logger
 from inkarms.config import get_config
 from inkarms.models.agent import AgentEvent, EventType
 from inkarms.models.platforms import PlatformType
+from inkarms.platforms.adapters import create_adapters
 from inkarms.platforms.adapters.protocol import PlatformAdapter
 from inkarms.platforms.processor import MessageProcessor
 from inkarms.platforms.rate_limiter import get_rate_limiter
@@ -40,122 +40,15 @@ app = typer.Typer(
 console = Console()
 
 
-def _get_config_value(config_dict: dict, key: str, env_var: str) -> str | None:
-    """Get config value, checking environment variable if not set."""
-    value = config_dict.get(key)
-    if value and value.startswith("${") and value.endswith("}"):
-        env_name = value[2:-1]
-        return os.getenv(env_name)
-    return value
-
-
-def _try_create_adapter(
-    name: str,
-    import_path: str,
-    class_name: str,
-    pip_package: str,
-    **kwargs,
-) -> PlatformAdapter | None:
-    """Try to create a platform adapter, handling import errors.
-
-    Args:
-        name: Human-readable platform name
-        import_path: Module import path
-        class_name: Adapter class name
-        pip_package: pip install instruction
-        **kwargs: Keyword arguments to pass to adapter constructor
-
-    Returns:
-        Adapter instance or None on import error
-    """
-    try:
-        import importlib
-
-        module = importlib.import_module(import_path)
-        adapter_cls = getattr(module, class_name)
-        return adapter_cls(**kwargs)
-    except ImportError as e:
-        console.print(f"[yellow]Warning: {name} adapter not available: {e}[/yellow]")
-        console.print(f"[dim]Install with: pip install {pip_package}[/dim]")
-        return None
-
-
 def _create_adapters(config) -> list[PlatformAdapter]:
-    """Create platform adapters based on configuration."""
-    adapters: list[PlatformAdapter] = []
+    """Create platform adapters — delegates to shared bootstrap helper.
 
-    # Telegram
-    if config.platforms.telegram.enable:
-        bot_token = _get_config_value(
-            config.platforms.telegram.model_dump(), "bot_token", "TELEGRAM_BOT_TOKEN"
-        )
-        if bot_token:
-            adapter = _try_create_adapter(
-                "Telegram",
-                "inkarms.platforms.adapters.telegram",
-                "TelegramAdapter",
-                "python-telegram-bot",
-                bot_token=bot_token,
-                allowed_users=config.platforms.telegram.allowed_users,
-                parse_mode=config.platforms.telegram.parse_mode,
-                polling_interval=config.platforms.telegram.polling_interval,
-            )
-            if adapter:
-                adapters.append(adapter)
-        else:
-            console.print(
-                "[yellow]Warning: Telegram enabled but bot_token not configured[/yellow]"
-            )
+    Uses Rich console.print for warnings so CLI UX stays unchanged.
+    """
+    def _warn(msg: str) -> None:
+        console.print(f"[yellow]Warning: {msg}[/yellow]")
 
-    # Slack
-    if config.platforms.slack.enable:
-        bot_token = _get_config_value(
-            config.platforms.slack.model_dump(), "bot_token", "SLACK_BOT_TOKEN"
-        )
-        app_token = _get_config_value(
-            config.platforms.slack.model_dump(), "app_token", "SLACK_APP_TOKEN"
-        )
-        if bot_token and app_token:
-            adapter = _try_create_adapter(
-                "Slack",
-                "inkarms.platforms.adapters.slack",
-                "SlackAdapter",
-                "slack-sdk",
-                bot_token=bot_token,
-                app_token=app_token,
-                allowed_channels=config.platforms.slack.allowed_channels,
-            )
-            if adapter:
-                adapters.append(adapter)
-        else:
-            console.print(
-                "[yellow]Warning: Slack enabled but tokens not configured[/yellow]"
-            )
-
-    # Discord
-    if config.platforms.discord.enable:
-        bot_token = _get_config_value(
-            config.platforms.discord.model_dump(), "bot_token", "DISCORD_BOT_TOKEN"
-        )
-        if bot_token:
-            adapter = _try_create_adapter(
-                "Discord",
-                "inkarms.platforms.adapters.discord",
-                "DiscordAdapter",
-                "discord.py",
-                bot_token=bot_token,
-                allowed_guilds=config.platforms.discord.allowed_guilds,
-                allowed_channels=config.platforms.discord.allowed_channels,
-                command_prefix=config.platforms.discord.command_prefix,
-            )
-            if adapter:
-                adapters.append(adapter)
-        else:
-            console.print(
-                "[yellow]Warning: Discord enabled but bot_token not configured[/yellow]"
-            )
-
-    return adapters
+    return create_adapters(config, warn_callback=_warn)
 
 
 def _platform_event_callback(event: AgentEvent) -> None:

@@ -91,7 +91,7 @@ class MessageRouter:
             try:
                 await adapter.start()
                 task = asyncio.create_task(
-                    self._listen_to_adapter(adapter), name=f"listen-{platform_name}"
+                    self.listen_to_adapter(adapter), name=f"listen-{platform_name}"
                 )
                 self._tasks.add(task)
                 task.add_done_callback(self._tasks.discard)
@@ -128,7 +128,7 @@ class MessageRouter:
 
         logger.info("Message router stopped")
 
-    async def _listen_to_adapter(self, adapter: PlatformAdapter) -> None:
+    async def listen_to_adapter(self, adapter: PlatformAdapter) -> None:
         """Listen for messages from a platform adapter."""
         platform_name = adapter.platform_type.value
         logger.info(f"Listening for messages from {platform_name}")
@@ -217,6 +217,25 @@ class MessageRouter:
                 )
             except Exception:
                 logger.error("Failed to send error message to user")
+
+        # Persist session metadata into hub.db session_index.
+        # hub_db is always available when the hub is running; silently skip otherwise.
+        if session_id:
+            try:
+                from inkarms.hub import db as hub_db
+                if hub_db.is_connected():
+                    await hub_db.upsert_session(
+                        session_id=session_id,
+                        platform=adapter.platform_type.value,
+                        platform_user_id=message.user.platform_user_id,
+                        channel_id=channel_id,
+                        display_name=message.user.username,
+                        turn_count_delta=1,
+                    )
+            except ImportError:
+                pass  # hub extras not installed — CLI mode
+            except Exception as _e:  # noqa: BLE001
+                logger.debug("session_index upsert skipped: %s", _e)
 
     async def _process_streaming(
         self,
