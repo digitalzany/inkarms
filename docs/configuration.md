@@ -42,7 +42,7 @@ InkArms loads configuration from multiple sources, in this order (later override
 | Skills | `~/.inkarms/skills/` | Installed skills |
 | Memory | `~/.inkarms/memory/` | Session logs and handoffs |
 | Secrets | `~/.inkarms/secrets/` | Encrypted API keys |
-| Audit Log | `~/.inkarms/audit.jsonl` | Activity log |
+| Audit Log | `~/.inkarms/audit/audit.jsonl` | Activity log |
 
 ## Complete Configuration Reference
 
@@ -93,6 +93,12 @@ providers:
   secrets:
     openai: "~/.inkarms/secrets/openai.enc"
     anthropic: "~/.inkarms/secrets/anthropic.enc"
+
+  # Automatically fetch the live model list from each provider's API on startup.
+  # Discovered models are merged into ~/.inkarms/providers.yaml (new IDs only;
+  # existing entries are never modified). Disabled by default — most users prefer
+  # to manage a small curated model list rather than pull the full provider catalogue.
+  auto_discover_models: false
 
 # =============================================================================
 # CONTEXT MANAGEMENT
@@ -174,7 +180,7 @@ security:
   # Audit logging
   audit_log:
     enable: true
-    path: "~/.inkarms/audit.jsonl"
+    path: "~/.inkarms/audit/audit.jsonl"
     rotation: "daily"  # daily | weekly | size
     retention_days: 90
     include_responses: false  # Warning: large!

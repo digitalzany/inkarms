@@ -41,6 +41,8 @@ class Menu:
                 result.append(("class:menu-selected", f"    ❯ {label}"))
                 if desc:
                     result.append(("class:menu-desc", f"      {desc}\n"))
+                else:
+                    result.append(("", "\n"))
             else:
                 result.append(("class:menu-item", f"      {label}\n"))
 

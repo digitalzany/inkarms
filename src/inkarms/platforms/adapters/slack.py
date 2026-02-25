@@ -3,16 +3,17 @@
 from __future__ import annotations
 
 import logging
+from typing import ClassVar
 
 from inkarms.models.platforms import (
     IncomingMessage,
     OutgoingMessage,
     PlatformCapabilities,
+    PlatformStreamChunk,
     PlatformType,
     PlatformUser,
-    PlatformStreamChunk,
 )
-from inkarms.platforms.adapters.protocol import PlatformAdapter
+from inkarms.platforms.adapters.protocol import PlatformAdapter, PlatformField
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,14 @@ class SlackAdapter(PlatformAdapter):
         - app_token: App-Level Token for Socket Mode (starts with xapp-)
         - allowed_channels: List of allowed channel IDs (empty = all channels)
     """
+
+    PLATFORM_KEY = "slack"
+    DISPLAY_NAME = "Slack"
+    WIZARD_FIELDS: ClassVar[list[PlatformField]] = [
+        PlatformField("bot_token", "Bot Token", "password", is_secret=True, required=True, hint="xoxb-..."),
+        PlatformField("app_token", "App Token", "password", is_secret=True, required=True, hint="xapp-..., required for Socket Mode"),
+        PlatformField("allowed_channels", "Allowed Channels", "list", hint="channel IDs, empty = all channels"),
+    ]
 
     def __init__(
         self,

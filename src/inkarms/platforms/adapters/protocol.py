@@ -6,6 +6,8 @@ import asyncio
 import logging
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Literal
 
 from inkarms.models.platforms import (
     IncomingMessage,
@@ -16,6 +18,27 @@ from inkarms.models.platforms import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PlatformField:
+    """Describes one configurable field for a platform adapter in the wizard.
+
+    Attributes:
+        key: Config/state key (maps to platform dict and config schema field).
+        label: Short display label shown in the menu.
+        input_type: How to collect the value from the user.
+        is_secret: If True, stored in SecretsManager; otherwise written to config YAML.
+        required: If True, the user cannot leave this field empty.
+        hint: Optional extra context appended to the input prompt, e.g. "from @BotFather".
+    """
+
+    key: str
+    label: str
+    input_type: Literal["text", "password", "list"]
+    is_secret: bool = False
+    required: bool = False
+    hint: str = ""
 
 
 class PlatformAdapter(ABC):

@@ -17,6 +17,10 @@ providers:
   #   - "anthropic/claude-3-haiku-20240307"
   #   - "openai/gpt-4o-mini"
 
+  # Auto-discover models from providers such as OpenAI, Gemini, Anthropic, etc.
+  # Requires configured API keys. Stores fetched models in ~/.inkarms/providers.yaml
+  auto_discover_models: false
+
   # Model aliases for convenience
   aliases: {}
   #   fast: "anthropic/claude-3-haiku-20240307"

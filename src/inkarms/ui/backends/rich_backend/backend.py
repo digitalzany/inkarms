@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 from datetime import datetime
 from typing import TYPE_CHECKING
 
@@ -114,22 +113,6 @@ class RichBackend(UIBackend):
 
     def initialize(self) -> None:
         """Initialize backend with InkArms core components."""
-        # Trigger background model update
-        try:
-            from inkarms.config.updater import fetch_and_update_models
-
-            def run_updater():
-                import asyncio
-
-                try:
-                    asyncio.run(fetch_and_update_models())
-                except Exception as e:
-                    logger.debug(f"Model updater failed: {e}")
-
-            threading.Thread(target=run_updater, daemon=True).start()
-        except Exception as e:
-            logger.debug(f"Failed to start model updater: {e}")
-
         try:
             from inkarms.config import get_config
             from inkarms.config.setup import is_initialized
@@ -194,7 +177,11 @@ class RichBackend(UIBackend):
             )
 
             if self._app_config.is_sandbox_enabled():
-                self._sandbox = SandboxExecutor.from_config(self._app_config.security)
+                from inkarms.audit import get_audit_logger
+
+                self._sandbox = SandboxExecutor.from_config(
+                    self._app_config.security, get_audit_logger()
+                )
 
             self._tool_registry = get_tool_registry()
             if len(self._tool_registry) == 0:
@@ -222,6 +209,7 @@ class RichBackend(UIBackend):
         if not self._configured:
             if not self.run_config_wizard():
                 self._configured = True  # Allow proceeding anyway
+            self._reload_config()
 
         current_view: UIView | None = UIView.MENU
 
@@ -243,6 +231,7 @@ class RichBackend(UIBackend):
                     current_view = self.run_sessions()
                 elif current_view == UIView.CONFIG:
                     self.run_config_wizard()
+                    self._reload_config()
                     current_view = UIView.MENU
                 elif current_view == UIView.SETTINGS:
                     current_view = self.run_settings()
@@ -324,6 +313,13 @@ class RichBackend(UIBackend):
 
     def display_info(self, message: str) -> None:
         logger.info(message)
+        self._messages.append(
+            ChatMessage(
+                role="system",
+                content=message,
+                timestamp=datetime.now().strftime("%H:%M"),
+            )
+        )
 
     def display_status(self, status: StatusInfo) -> None:
         self._status = status
@@ -525,6 +521,18 @@ class RichBackend(UIBackend):
             return "chat"
 
         return "menu"
+
+    def _reload_config(self) -> None:
+        """Reload config from disk and update runtime model/provider state."""
+        try:
+            from inkarms.config import get_config
+
+            self._app_config = get_config(reload=True)
+            new_model = self._app_config.providers.default
+            self._status.model = new_model
+            self._status.provider = new_model.split("/")[0] if "/" in new_model else "unknown"
+        except Exception as e:
+            logger.debug(f"Config reload failed: {e}")
 
     def _get_query_processor(self):
         """Get the query processor, creating it if needed."""

@@ -597,7 +597,7 @@ platforms:
 Check who's using your bot:
 
 ```bash
-cat ~/.inkarms/logs/audit.jsonl | jq 'select(.event | startswith("platform_"))'
+cat ~/.inkarms/audit/audit.jsonl | jq 'select(.event | startswith("platform_"))'
 ```
 
 ### 5. Keep Tokens Secure
@@ -717,5 +717,5 @@ sudo systemctl status inkarms-platforms
 
 For issues or questions, check the audit logs:
 ```bash
-tail -f ~/.inkarms/logs/audit.jsonl
+tail -f ~/.inkarms/audit/audit.jsonl
 ```

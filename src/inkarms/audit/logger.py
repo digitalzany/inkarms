@@ -5,6 +5,7 @@ This module provides JSON Lines based audit logging for tracking
 commands, queries, and system events.
 """
 
+import atexit
 import gzip
 import hashlib
 import json
@@ -109,6 +110,7 @@ class AuditLogger:
         # Ensure log directory exists
         if self.enable:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
+            atexit.register(self.flush)
 
     @classmethod
     def from_config(cls, config: Any) -> "AuditLogger":

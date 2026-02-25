@@ -231,6 +231,7 @@ class QueryProcessor:
                 result = loop.run_until_complete(async_fn(loop))
                 on_success(result)
             except Exception as e:
+                logger.error("Query failed: %s", e, exc_info=True)
                 on_error(str(e))
             finally:
                 with contextlib.suppress(Exception):
@@ -249,6 +250,13 @@ class QueryProcessor:
 
     def _track_user_message(self, query: str) -> None:
         """Track user message in session manager."""
+        try:
+            from inkarms.audit import get_audit_logger
+
+            get_audit_logger().log_query(query, platform="cli")
+        except Exception as e:
+            logger.debug("Failed to write audit query log: %s", e)
+
         if self._session:
             try:
                 self._session.add_user_message(query)

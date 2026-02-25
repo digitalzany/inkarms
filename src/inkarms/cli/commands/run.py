@@ -37,6 +37,7 @@ from inkarms.skills import (
     SkillParseError,
     get_skill_manager,
 )
+from inkarms.audit import get_audit_logger
 from inkarms.tools.builtin import register_builtin_tools
 from inkarms.tools.registry import ToolRegistry
 
@@ -65,7 +66,7 @@ async def _run_with_tools(
 
     # Setup tool registry
     registry = ToolRegistry()
-    sandbox = SandboxExecutor.from_config(config.security)
+    sandbox = SandboxExecutor.from_config(config.security, get_audit_logger())
     register_builtin_tools(registry, sandbox)
 
     # Map approval mode

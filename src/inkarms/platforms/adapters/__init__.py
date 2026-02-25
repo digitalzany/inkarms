@@ -8,27 +8,55 @@ from collections.abc import Callable
 from typing import Any
 
 from inkarms.platforms.adapters.discord import DiscordAdapter
+from inkarms.platforms.adapters.protocol import PlatformAdapter
 from inkarms.platforms.adapters.slack import SlackAdapter
 from inkarms.platforms.adapters.telegram import TelegramAdapter
-from inkarms.platforms.adapters.protocol import PlatformAdapter
+
+ADAPTER_CLASSES = [TelegramAdapter, SlackAdapter, DiscordAdapter]
 
 __all__ = [
     "DiscordAdapter",
     "SlackAdapter",
     "TelegramAdapter",
     "create_adapters",
+    "get_platform_metadata",
 ]
 
 logger = logging.getLogger(__name__)
 
 
+def get_platform_metadata() -> list[tuple[str, str, list]]:
+    """Return (platform_key, display_name, wizard_fields) for all registered adapters."""
+    return [(cls.PLATFORM_KEY, cls.DISPLAY_NAME, cls.WIZARD_FIELDS) for cls in ADAPTER_CLASSES]
+
+
 def _get_config_value(config_dict: dict[str, Any], key: str, env_var: str) -> str | None:
-    """Return config value, resolving ``${ENV_VAR}`` syntax to env."""
+    """Return config value, resolving ``${ENV_VAR}`` syntax to env, falling back to env_var."""
     value = config_dict.get(key)
     if value and isinstance(value, str) and value.startswith("${") and value.endswith("}"):
         env_name = value[2:-1]
         return os.getenv(env_name)
-    return value
+    return value or os.getenv(env_var)
+
+
+def _load_platform_secrets() -> None:
+    """Load platform tokens from SecretsManager into env vars (if not already set)."""
+    try:
+        from inkarms.secrets import SecretsManager  # noqa: PLC0415
+
+        secrets = SecretsManager()
+        for cls in ADAPTER_CLASSES:
+            for field in cls.WIZARD_FIELDS:
+                if not field.is_secret:
+                    continue
+                secret_name = f"{cls.PLATFORM_KEY}_{field.key}"
+                env_var = f"{cls.PLATFORM_KEY.upper()}_{field.key.upper()}"
+                if not os.environ.get(env_var) and secrets.exists(secret_name):
+                    value = secrets.get(secret_name)
+                    if value:
+                        os.environ[env_var] = value
+    except Exception:
+        logger.debug("Could not load platform secrets from SecretsManager")
 
 
 def _try_create_adapter(
@@ -83,6 +111,7 @@ def create_adapters(
     if warn_callback is None:
         warn_callback = logger.warning
 
+    _load_platform_secrets()
     adapters: list[PlatformAdapter] = []
 
     # Telegram

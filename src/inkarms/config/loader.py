@@ -11,18 +11,25 @@ Loads and merges configuration from multiple sources:
 
 import os
 import re
+import yaml
+import logging
+import asyncio
+import threading
+
 from pathlib import Path
 from typing import Any
 
-import yaml
 
-from inkarms.config.merger import deep_merge, get_nested_value, set_nested_value
-from inkarms.config.schema import Config
+logger = logging.getLogger(__name__)
+
 from inkarms.storage.paths import (
     find_project_config,
     get_global_config_path,
     get_profile_path,
 )
+from inkarms.config.schema import Config
+from inkarms.config.updater import fetch_and_update_models
+from inkarms.config.merger import deep_merge, get_nested_value, set_nested_value
 
 
 class ConfigurationError(Exception):
@@ -243,6 +250,7 @@ def get_config_sources() -> dict[str, Path | None]:
 
 # Singleton for cached config
 _cached_config: Config | None = None
+_updater_started: bool = False
 
 
 def get_config(reload: bool = False) -> Config:
@@ -257,12 +265,30 @@ def get_config(reload: bool = False) -> Config:
     Returns:
         Config instance.
     """
-    global _cached_config
+    global _cached_config, _updater_started
 
     if _cached_config is None or reload:
         _cached_config = load_config()
 
+    if not _updater_started:
+        _updater_started = True
+        if _cached_config.providers.auto_discover_models:
+            _start_background_model_update()
+
     return _cached_config
+
+
+def _start_background_model_update() -> None:
+    """Spawn a daemon thread that fetches new models in the background."""
+
+    def _run() -> None:
+        try:
+            asyncio.run(fetch_and_update_models())
+
+        except Exception as exc:
+            logger.debug("Background model update failed: %s", exc)
+
+    threading.Thread(target=_run, daemon=True, name="model-updater").start()
 
 
 def clear_config_cache() -> None:
