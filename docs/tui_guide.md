@@ -134,43 +134,37 @@ The UI provides several views accessible from the main menu or via slash command
 
 ### QuickStart Mode (Recommended)
 
-4 simple steps to get started:
+Three sections to get started in minutes:
 
-**Step 1: Choose Provider**
-- Anthropic Claude (Recommended)
-- OpenAI
-- GitHub Copilot
-- Other
+**Provider Setup**
+- Select your AI provider (Anthropic, OpenAI, Gemini, Ollama, ...)
+- Choose your default model
+- Enter (or confirm) your API key — stored encrypted
+- Enable or disable automatic model discovery from the provider API
 
-**Step 2: API Key Setup**
-- Enter your API key (encrypted storage)
-- Skip for GitHub Copilot (uses OAuth)
-- Or configure later
-
-**Step 3: Security Configuration**
-- Whitelist mode (most secure)
-- Blacklist mode
-- Prompt mode
+**Security**
+- Whitelist mode (most secure — only listed commands are allowed)
+- Blacklist mode (default — dangerous patterns are blocked)
+- Prompt mode (ask before each command executes)
 - Disabled (development only)
 
-**Step 4: Tool Configuration**
-- Enable/disable tool execution
-- HTTP, Python, Git tools
+**Summary**
+- Review your choices and save to `~/.inkarms/config.yaml`
 
 ### Advanced Mode
 
-8 comprehensive sections:
+Non-linear section menu — jump to any section, configure it, and return. All 8 sections:
 
 | Section | Settings |
 |---------|----------|
-| 1. Provider | Model, fallback, timeout, retries |
-| 2. Context | Compaction strategy, thresholds, handoffs |
-| 3. Security | Sandbox mode, path restrictions, audit log |
-| 4. Tools | Enable tools, approval mode, iterations |
-| 5. Skills | Enable skills, auto-inject, indexing |
-| 6. Cost | Cost tracking, daily/monthly budgets |
-| 7. UI | Theme, status bar, timestamps |
-| 8. General | Output format, verbose, telemetry |
+| 1. Provider | Default model, API key, model discovery |
+| 2. Security | Sandbox mode, path restrictions |
+| 3. Tools | Web Search (Brave API key) |
+| 4. Agent | Tool approval mode, max iterations |
+| 5. Context | Compaction strategy, auto-compact threshold |
+| 6. Cost | Daily budget, block on budget exceed |
+| 7. Hub | Enable hub daemon, port, localhost trust |
+| 8. Platforms | Telegram, Slack, Discord tokens |
 
 ### Navigation
 

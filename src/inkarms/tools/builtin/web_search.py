@@ -1,15 +1,15 @@
 from __future__ import annotations
 
-import os
 import logging
+import os
+from datetime import date
+from typing import Any
+
 import httpx
 
-from typing import Any
-from datetime import date
-
-from inkarms.tools.base import Tool
 from inkarms.config import get_config
 from inkarms.models.tools import ToolParameter, ToolResult
+from inkarms.tools.base import Tool
 
 logger = logging.getLogger(__name__)
 
@@ -17,19 +17,27 @@ _BRAVE_API_URL = "https://api.search.brave.com/res/v1/web/search"
 
 
 def get_brave_api_key() -> str | None:
-    """Return the Brave Search API key, checking env vars then config.
+    """Return the Brave Search API key.
 
     Priority:
         1. BRAVE_API_KEY environment variable
         2. BRAVE_SEARCH_API_KEY environment variable (alias)
-        3. tools.web_search.brave_api_key in InkArms config
+        3. SecretsManager (key: "brave_search")
+        4. tools.web_search.brave_api_key in InkArms config
     """
     key = os.environ.get("BRAVE_API_KEY") or os.environ.get("BRAVE_SEARCH_API_KEY")
     if key:
         return key
     try:
-        return get_config().tools.web_search.brave_api_key or None
+        from inkarms.secrets import SecretsManager  # noqa: PLC0415
 
+        key = SecretsManager().get("brave_search")
+        if key:
+            return key
+    except Exception:
+        pass
+    try:
+        return get_config().tools.web_search.brave_api_key or None
     except Exception:
         return None
 

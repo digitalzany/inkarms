@@ -4,6 +4,7 @@ Main Typer application for inkarms CLI.
 This module defines the root CLI application and registers all command groups.
 """
 
+import logging
 import typer
 
 from typing import Annotated
@@ -31,6 +32,27 @@ app = typer.Typer(
     pretty_exceptions_enable=True,
     pretty_exceptions_show_locals=False,
 )
+
+
+def _setup_file_logging() -> None:
+    """Attach a rotating file handler to the inkarms logger namespace."""
+    from inkarms.storage.paths import get_inkarms_home
+
+    log_dir = get_inkarms_home() / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / "cli.log"
+
+    from logging.handlers import RotatingFileHandler
+
+    handler = RotatingFileHandler(log_file, maxBytes=10 * 1024 * 1024, backupCount=3)
+    handler.setLevel(logging.DEBUG)
+    handler.setFormatter(
+        logging.Formatter("%(asctime)s %(levelname)-8s %(name)s: %(message)s")
+    )
+
+    inkarms_log = logging.getLogger("inkarms")
+    inkarms_log.setLevel(logging.DEBUG)
+    inkarms_log.addHandler(handler)
 
 
 def version_callback(value: bool) -> None:
@@ -86,6 +108,8 @@ def main_callback(
     Run [bold]inkarms[/bold] without arguments to launch the interactive UI.
     Use [bold]inkarms --help[/bold] to see all commands.
     """
+    _setup_file_logging()
+
     # If no subcommand is invoked, launch the UI
     if ctx.invoked_subcommand is None:
         _launch_ui(ui_backend)

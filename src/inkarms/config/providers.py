@@ -124,6 +124,12 @@ def _get_providers() -> dict[str, ProviderInfo]:
     return _CACHED_PROVIDERS
 
 
+def clear_providers_cache() -> None:
+    """Clear the cached providers so the next call re-reads from disk."""
+    global _CACHED_PROVIDERS
+    _CACHED_PROVIDERS = None
+
+
 # Lazy proxy for PROVIDERS to maintain compatibility while loading dynamically
 class ProvidersProxy(dict):
     def __init__(self):

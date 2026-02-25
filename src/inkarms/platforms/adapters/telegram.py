@@ -7,17 +7,17 @@ import logging
 import re
 import time
 from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import Any, ClassVar
 
 from inkarms.models.platforms import (
     IncomingMessage,
     OutgoingMessage,
     PlatformCapabilities,
+    PlatformStreamChunk,
     PlatformType,
     PlatformUser,
-    PlatformStreamChunk,
 )
-from inkarms.platforms.adapters.protocol import PlatformAdapter
+from inkarms.platforms.adapters.protocol import PlatformAdapter, PlatformField
 from inkarms.platforms.formatting import markdown_to_telegram_html
 
 logger = logging.getLogger(__name__)
@@ -55,6 +55,13 @@ class TelegramAdapter(PlatformAdapter):
         - polling_interval: Seconds between poll requests (default: 2)
         - command_callback: Async callback for slash command handling
     """
+
+    PLATFORM_KEY = "telegram"
+    DISPLAY_NAME = "Telegram"
+    WIZARD_FIELDS: ClassVar[list[PlatformField]] = [
+        PlatformField("bot_token", "Bot Token", "password", is_secret=True, required=True, hint="from @BotFather"),
+        PlatformField("allowed_users", "Allowed Users, comma-separated", "list", hint="Telegram user IDs (comma-separated), empty = all users"),
+    ]
 
     def __init__(
         self,
@@ -240,7 +247,13 @@ class TelegramAdapter(PlatformAdapter):
                     platform_user, command, args, channel_id, message_id,
                 )
                 if reply:
-                    await message.reply_text(reply, parse_mode=None)
+                    max_len = self.CAPABILITIES.max_message_length or 4096
+                    if len(reply) > max_len:
+                        await self._send_split_message(
+                            str(message.chat_id), reply, None, message.message_id,
+                        )
+                    else:
+                        await message.reply_text(reply, parse_mode=None)
             except Exception as e:
                 logger.error(f"Command callback error: {e}", exc_info=True)
                 await message.reply_text(f"Error: {e}", parse_mode=None)

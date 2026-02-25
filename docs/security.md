@@ -253,7 +253,7 @@ The following events are logged:
 security:
   audit_log:
     enable: true
-    path: ~/.inkarms/audit.jsonl
+    path: ~/.inkarms/audit/audit.jsonl
 
     # Rotation
     rotation: daily           # daily, weekly, or size
@@ -356,16 +356,16 @@ Parse logs with standard JSON tools:
 
 ```bash
 # Count events by type
-cat ~/.inkarms/audit.jsonl | jq -r .event_type | sort | uniq -c
+cat ~/.inkarms/audit/audit.jsonl | jq -r .event_type | sort | uniq -c
 
 # Find all blocked commands
-cat ~/.inkarms/audit.jsonl | jq 'select(.event_type=="command_blocked")'
+cat ~/.inkarms/audit/audit.jsonl | jq 'select(.event_type=="command_blocked")'
 
 # Calculate total cost
-cat ~/.inkarms/audit.jsonl | jq 'select(.cost) | .cost' | awk '{s+=$1} END {print s}'
+cat ~/.inkarms/audit/audit.jsonl | jq 'select(.cost) | .cost' | awk '{s+=$1} END {print s}'
 
 # Commands in last hour
-cat ~/.inkarms/audit.jsonl | jq 'select(.timestamp > "2026-02-02T09:00:00")'
+cat ~/.inkarms/audit/audit.jsonl | jq 'select(.timestamp > "2026-02-02T09:00:00")'
 ```
 
 ## Best Practices
@@ -487,7 +487,7 @@ security:
   # Audit logging
   audit_log:
     enable: true
-    path: ~/.inkarms/audit.jsonl
+    path: ~/.inkarms/audit/audit.jsonl
     rotation: daily
     max_size_mb: 100
     retention_days: 90

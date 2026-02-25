@@ -67,6 +67,8 @@ providers:
     env_var: "OPENAI_API_KEY"
     default_model: "gpt-4o"
     default_context_window: 128000
+    api_models_endpoint: "https://api.openai.com/v1/models"
+    api_models_mapper: "openai"
     models:
       - id: "gpt-4o"
         name: "GPT-4o"

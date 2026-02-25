@@ -102,7 +102,7 @@ Giving an AI a terminal sounds terrifying. InkArms takes that seriously:
 
 ```bash
 # See what InkArms is doing
-cat ~/.inkarms/audit.jsonl | jq .
+cat ~/.inkarms/audit/audit.jsonl | jq .
 
 # Tighten down what bash can run
 inkarms config set security.sandbox.mode whitelist
@@ -212,6 +212,10 @@ providers:
   aliases:
     fast: "openai/gpt-3.5-turbo"
     local: "ollama/llama3.1"
+  # Fetch the live model list from each provider's API on startup
+  # and merge newly-discovered models into ~/.inkarms/providers.yaml.
+  # Disabled by default — enable in the config wizard if you want the full catalogue.
+  auto_discover_models: false
 ```
 
 If OpenAI is down, it falls over to the next provider automatically. Costs are tracked per session and visible in the status bar.

@@ -48,6 +48,7 @@ class ProviderConfig(BaseModel):
     fallback: list[str] = Field(default_factory=list)
     aliases: dict[str, str] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
+    auto_discover_models: bool = False
 
 
 # =============================================================================

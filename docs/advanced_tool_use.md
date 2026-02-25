@@ -743,7 +743,7 @@ The following tools are considered dangerous and require approval in manual mode
    - Timeout enforcement
    - Resource limits
 
-2. **Audit Logging**: All tool executions logged to `~/.inkarms/audit.jsonl`:
+2. **Audit Logging**: All tool executions logged to `~/.inkarms/audit/audit.jsonl`:
    ```json
    {
      "timestamp": "2024-01-05T14:32:15.123Z",

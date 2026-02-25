@@ -1,18 +1,37 @@
 """
-Configuration updater for InkArms.
+Background model discovery for InkArms.
 
-Fetches model lists from different providers and updates the local configuration.
+Fetches the live model list from each configured provider and merges any
+newly-discovered models into ``~/.inkarms/providers.yaml``.  The process
+runs silently on startup; every failure is logged at DEBUG level so it
+never interrupts the user.
+
+Adding support for a new HTTP provider
+---------------------------------------
+1. Subclass ``_HttpFetcher`` and implement ``_build_headers``,
+   optionally ``_build_params``, and ``_map_response``.
+2. Add one entry to ``_HTTP_FETCHERS``.
+3. Set ``api_models_endpoint`` and ``api_models_mapper`` for the provider
+   in ``src/inkarms/config/defaults/providers.yaml``.
+
+Adding support for a new local provider
+-----------------------------------------
+1. Subclass ``_LocalFetcher`` and implement ``fetch``.
+2. Add one entry to ``_LOCAL_FETCHERS``.
+3. Set ``api_models_mapper`` (and ``is_local: true``) for the provider
+   in ``src/inkarms/config/defaults/providers.yaml``.
 """
 
-import os
-import time
+from __future__ import annotations
+
 import logging
+import os
+from abc import ABC, abstractmethod
 from datetime import datetime
 from typing import Any
 
-import yaml
 import httpx
-import ollama
+import yaml
 
 from inkarms.config.providers import PROVIDERS, ModelInfo, ProviderInfo
 from inkarms.secrets import SecretsManager
@@ -21,247 +40,319 @@ from inkarms.storage.paths import get_inkarms_home
 logger = logging.getLogger(__name__)
 
 
-async def fetch_and_update_models() -> None:
-    """
-    Fetch available models from provider APIs and update user configuration.
+class _HttpFetcher(ABC):
+    """Base class for fetching models from a remote provider REST API."""
 
-    This runs silently and best-effort. Failures are suppressed/logged.
+    async def fetch(self, endpoint: str, api_key: str) -> list[ModelInfo]:
+        """GET *endpoint*, authenticate with *api_key*, return mapped models."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(
+                endpoint,
+                headers=self._build_headers(api_key),
+                params=self._build_params(api_key),
+            )
+            response.raise_for_status()
+            return self._map_response(response.json())
+
+    @abstractmethod
+    def _build_headers(self, api_key: str) -> dict[str, str]:
+        """Return request headers (auth, content-type, …)."""
+
+    def _build_params(self, api_key: str) -> dict[str, str]:  # noqa: ARG002
+        """Return query-string parameters.  Override when the API uses them for auth."""
+        return {}
+
+    @abstractmethod
+    def _map_response(self, data: dict[str, Any]) -> list[ModelInfo]:
+        """Parse the raw JSON response into a list of ModelInfo objects."""
+
+
+class _AnthropicFetcher(_HttpFetcher):
+    def _build_headers(self, api_key: str) -> dict[str, str]:
+        return {
+            "x-api-key": api_key,
+            "anthropic-version": "2023-06-01",
+            "content-type": "application/json",
+        }
+
+    def _map_response(self, data: dict[str, Any]) -> list[ModelInfo]:
+        # Response: {"data": [{"id": "...", "display_name": "...", "created_at": "...", "type": "model"}]}
+        models = []
+        for item in data.get("data", []):
+            if item.get("type") != "model":
+                continue
+            model_id = item.get("id")
+            if not model_id:
+                continue
+            models.append(
+                ModelInfo(
+                    id=model_id,
+                    name=item.get("display_name", model_id),
+                    description=f"Released {item.get('created_at', '')[:10]}",
+                )
+            )
+        return models
+
+
+class _GeminiFetcher(_HttpFetcher):
+    def _build_headers(self, api_key: str) -> dict[str, str]:  # noqa: ARG002
+        return {}
+
+    def _build_params(self, api_key: str) -> dict[str, str]:
+        # Google uses a query-string key instead of a header
+        return {"key": api_key}
+
+    def _map_response(self, data: dict[str, Any]) -> list[ModelInfo]:
+        # Response: {"models": [{"name": "models/gemini-…", "displayName": "…", …}]}
+        models = []
+        for item in data.get("models", []):
+            raw_name = item.get("name", "")
+            model_id = raw_name.removeprefix("models/")
+            if not model_id or "gemini" not in model_id:
+                continue
+            models.append(
+                ModelInfo(
+                    id=model_id,
+                    name=item.get("displayName", model_id),
+                    description=item.get("description", ""),
+                    context_window=item.get("inputTokenLimit", 32_000),
+                )
+            )
+        return models
+
+
+class _OpenAIFetcher(_HttpFetcher):
+    # Prefixes that identify non-chat models (image, audio, embeddings, legacy).
+    # New chat model families are included automatically without any code change.
+    _EXCLUDED_PREFIXES: tuple[str, ...] = (
+        "dall-e",
+        "whisper",
+        "tts",
+        "text-embedding",
+        "text-moderation",
+        "omni-moderation",
+        "babbage",
+        "davinci",
+        "cushman",
+    )
+
+    def _build_headers(self, api_key: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {api_key}"}
+
+    def _map_response(self, data: dict[str, Any]) -> list[ModelInfo]:
+        # Response: {"data": [{"id": "gpt-4o", "object": "model", "owned_by": "openai", …}]}
+        models = []
+        for item in data.get("data", []):
+            model_id = item.get("id", "")
+            if not model_id:
+                continue
+            if any(model_id.startswith(prefix) for prefix in self._EXCLUDED_PREFIXES):
+                continue
+            models.append(ModelInfo(id=model_id, name=model_id))
+        return models
+
+
+# Registry: mapper name → fetcher instance.
+# To support a new HTTP provider, add one entry here.
+_HTTP_FETCHERS: dict[str, _HttpFetcher] = {
+    "anthropic": _AnthropicFetcher(),
+    "gemini": _GeminiFetcher(),
+    "openai": _OpenAIFetcher(),
+}
+
+
+class _LocalFetcher(ABC):
+    """Base class for fetching models from a locally-running service."""
+
+    @abstractmethod
+    def fetch(self) -> list[ModelInfo]:
+        """Return all models available from the local service."""
+
+
+class _OllamaFetcher(_LocalFetcher):
+    def fetch(self) -> list[ModelInfo]:
+        try:
+            import ollama  # optional dependency — imported lazily
+        except ImportError:
+            logger.debug("ollama package not installed; skipping local model discovery")
+            return []
+
+        try:
+            raw_models = ollama.list().get("models", [])
+        except Exception as exc:
+            logger.debug("ollama.list() failed: %s", exc)
+            return []
+
+        return [
+            ModelInfo(
+                id=m.get("model", "ollama-model"),
+                name=m.get("model", "ollama-model"),
+                description=f"Modified at {m.get('modified_at', 'unknown')}",
+            )
+            for m in raw_models
+        ]
+
+
+# Registry: mapper name → fetcher instance.
+# To support a new local provider, add one entry here.
+_LOCAL_FETCHERS: dict[str, _LocalFetcher] = {
+    "ollama": _OllamaFetcher(),
+}
+
+
+async def fetch_and_update_models() -> None:
+    """Fetch available models from all configured providers and persist new ones.
+
+    Runs silently and best-effort — every failure is suppressed so this never
+    interrupts the user.
     """
     try:
-        # logger.info("Starting background model discovery...")
-        updated_models = {}
+        new_models: dict[str, list[ModelInfo]] = {}
 
-        # Iterate over all providers
-        # Note: We iterate over keys to avoid modification issues if PROVIDERS changes
-        provider_ids = list(PROVIDERS.keys())
-
-        for provider_id in provider_ids:
-            provider: ProviderInfo = PROVIDERS[provider_id]
-
+        for provider_id, provider in PROVIDERS.items():
             if provider.is_local:
-                local_models = _fetch_local_provider_models(provider.api_models_mapper or provider_id)
-                updated_models[provider_id] = local_models
-                continue
+                models = _fetch_local_models(provider_id, provider)
+            else:
+                models = await _fetch_remote_models(provider_id, provider)
 
-            elif not provider.api_models_endpoint or not provider.api_models_mapper:
-                continue
+            if models:
+                new_models[provider_id] = models
 
-            # Get API key
-            api_key = _get_api_key(provider.env_var)
-            if not api_key:
-                continue
+        if new_models:
+            _update_user_config(new_models)
 
-            try:
-                # Fetch models
-                fetched_models = await _fetch_provider_models(
-                    provider.api_models_endpoint, provider.api_models_mapper, api_key
-                )
-
-                # Filter out models that are already known (in defaults or user config)
-                known_ids = {m.id for m in provider.models}
-                new_models = [m for m in fetched_models if m.id not in known_ids]
-
-                if new_models:
-                    updated_models[provider_id] = new_models
-                    logger.info(f"Found {len(new_models)} new models for {provider_id}")
-
-            except Exception as e:
-                logger.debug(f"Failed to fetch models for {provider_id}: {e}")
-
-        # If we found any new models, update configuration
-        if updated_models:
-            _update_user_config(updated_models)
-
-    except Exception as e:
-        logger.debug(f"Model update process failed: {e}")
+    except Exception as exc:
+        logger.debug("Model update process failed: %s", exc)
 
 
-def _get_api_key(env_var: str | None) -> str | None:
-    """Get API key from environment or secrets."""
+async def _fetch_remote_models(
+    provider_id: str, provider: ProviderInfo
+) -> list[ModelInfo]:
+    """Return models discovered from a remote API that aren't already known."""
+    if not provider.api_models_endpoint or not provider.api_models_mapper:
+        return []
+
+    fetcher = _HTTP_FETCHERS.get(provider.api_models_mapper)
+    if fetcher is None:
+        logger.debug(
+            "No HTTP fetcher registered for mapper %r (provider: %s)",
+            provider.api_models_mapper,
+            provider_id,
+        )
+        return []
+
+    api_key = _get_api_key(provider.env_var, provider_id)
+    if not api_key:
+        return []
+
+    try:
+        all_models = await fetcher.fetch(provider.api_models_endpoint, api_key)
+        known_ids = {m.id for m in provider.models}
+        new_models = [m for m in all_models if m.id not in known_ids]
+        if new_models:
+            logger.info("Found %d new model(s) for %s", len(new_models), provider_id)
+        return new_models
+    except Exception as exc:
+        logger.debug("Failed to fetch models for %s: %s", provider_id, exc)
+        return []
+
+
+def _fetch_local_models(provider_id: str, provider: ProviderInfo) -> list[ModelInfo]:
+    """Return models discovered from a local service."""
+    mapper = provider.api_models_mapper or provider_id
+    fetcher = _LOCAL_FETCHERS.get(mapper)
+    if fetcher is None:
+        logger.debug(
+            "No local fetcher registered for mapper %r (provider: %s)",
+            mapper,
+            provider_id,
+        )
+        return []
+
+    try:
+        return fetcher.fetch()
+    except Exception as exc:
+        logger.debug("Failed to fetch local models for %s: %s", provider_id, exc)
+        return []
+
+
+def _get_api_key(env_var: str | None, provider_id: str | None = None) -> str | None:
+    """Return the API key from the environment or the secrets store.
+
+    Lookup order:
+    1. Environment variable (e.g. ``ANTHROPIC_API_KEY``).
+    2. Secrets store keyed by provider ID (e.g. ``"anthropic"`` — how the
+       config wizard persists keys via ``SecretsManager().set(provider, key)``).
+    3. Secrets store keyed by the lowercase env-var name as a last resort.
+    """
     if not env_var:
         return None
 
-    # Check env var first
-    key = os.environ.get(env_var)
-    if key:
-        return key
+    value = os.environ.get(env_var)
+    if value:
+        return value
 
-    # Check secrets manager
     try:
         secrets = SecretsManager()
-        # Map env var to secret key (e.g. ANTHROPIC_API_KEY -> anthropic_api_key)
-        secret_key = env_var.lower()
-        return secrets.get(secret_key)
-
+        if provider_id:
+            value = secrets.get(provider_id)
+            if value:
+                return value
+        return secrets.get(env_var.lower())
     except Exception:
         return None
 
 
-def _fetch_local_provider_models(mapper: str) -> list[ModelInfo]:
-    """Fetch and map models from a local provider"""
-    if mapper == "ollama":
-        return _map_ollama_models()
-
-    return []
-
-def _map_ollama_models():
-    """Map Ollama response to ModelInfo objects."""
-    models = []
-    ollama_models = ollama.list().get('models', [])
-
-    models.extend([
-        ModelInfo(
-            id=model.get('model', "ollama-model"),
-            name=model.get('model', f"unknown-ollama-model-{time.time_ns()}"),
-            description=f"Released/modified at {model.get('modified_at', '')}",
-        )
-        for model in ollama_models
-    ])
-
-    return models
-
-async def _fetch_provider_models(endpoint: str, mapper: str, api_key: str) -> list[ModelInfo]:
-    """Fetch and map models from a specific provider."""
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        if mapper == "anthropic":
-            headers = {
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            }
-            response = await client.get(endpoint, headers=headers)
-            response.raise_for_status()
-            return _map_anthropic_models(response.json())
-
-        elif mapper == "gemini":
-            # Google uses query param for key
-            params = {"key": api_key}
-            response = await client.get(endpoint, params=params)
-            response.raise_for_status()
-            return _map_google_models(response.json())
-
-        return []
-
-
-def _map_anthropic_models(data: dict[str, Any]) -> list[ModelInfo]:
-    """Map Anthropic API response to ModelInfo objects."""
-    models = []
-    # Response format: {"data": [{"id": "...", "display_name": "...", ...}]}
-    for item in data.get("data", []):
-        if item.get("type") != "model":
-            continue
-
-        model_id = item.get("id")
-        if not model_id:
-            continue
-
-        models.append(
-            ModelInfo(
-                id=model_id,
-                name=item.get("display_name", model_id),
-                description=f"Released {item.get('created_at', '')[:10]}",
-            )
-        )
-    return models
-
-
-def _map_google_models(data: dict[str, Any]) -> list[ModelInfo]:
-    """Map Google Gemini API response to ModelInfo objects."""
-    models = []
-    # Response format: {"models": [{"name": "models/...", "displayName": "...", ...}]}
-    for item in data.get("models", []):
-        name = item.get("name", "")
-        # Remove "models/" prefix
-        model_id = name.replace("models/", "") if name.startswith("models/") else name
-
-        if not model_id or "gemini" not in model_id:
-            continue
-
-        models.append(
-            ModelInfo(
-                id=model_id,
-                name=item.get("displayName", model_id),
-                description=item.get("description", ""),
-                context_window=item.get("inputTokenLimit", 32000),
-            )
-        )
-    return models
-
-
 def _update_user_config(new_models_map: dict[str, list[ModelInfo]]) -> None:
-    """
-    Merge fetched models into user configuration file.
+    """Merge newly-discovered models into ``~/.inkarms/providers.yaml``.
 
-    Args:
-        new_models_map: Dictionary mapping provider_id to list of ModelInfo objects.
+    Only models whose ``id`` is not yet present in the file are appended;
+    existing entries are never modified or removed.
     """
     config_path = get_inkarms_home() / "providers.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Ensure directory exists
-    if not config_path.parent.exists():
-        try:
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            logger.error(f"Failed to create config directory {config_path.parent}: {e}")
-            return
-
-    # Load existing user config
-    user_config = {}
+    user_config: dict[str, Any] = {}
     if config_path.exists():
         try:
-            with open(config_path, encoding="utf-8") as f:
-                user_config = yaml.safe_load(f) or {}
-
+            with config_path.open(encoding="utf-8") as fh:
+                user_config = yaml.safe_load(fh) or {}
         except Exception:
-            # If invalid, start fresh or abort? Safest to abort to not lose user data
-            logger.warning("Could not read providers.yaml, skipping update")
+            logger.warning(
+                "Could not read %s — skipping model update to avoid data loss", config_path
+            )
             return
 
-    if "providers" not in user_config:
-        user_config["providers"] = {}
+    user_config.setdefault("providers", {})
+    changes = False
 
-    changes_made = False
+    for provider_id, models in new_models_map.items():
+        provider_section = user_config["providers"].setdefault(provider_id, {})
+        existing = provider_section.setdefault("models", [])
+        existing_ids = {m["id"] for m in existing if "id" in m}
 
-    for provider_id, fetched_models in new_models_map.items():
-        if provider_id not in user_config["providers"]:
-            user_config["providers"][provider_id] = {}
+        for model in models:
+            if model.id in existing_ids:
+                continue
+            entry: dict[str, Any] = {"id": model.id, "name": model.name}
+            if model.description:
+                entry["description"] = model.description
+            if model.context_window:
+                entry["context_window"] = model.context_window
+            existing.append(entry)
+            changes = True
 
-        provider_section = user_config["providers"][provider_id]
+    if not changes:
+        return
 
-        # Initialize models list if needed
-        if "models" not in provider_section:
-            provider_section["models"] = []
-
-        current_models = provider_section["models"]
-        existing_ids = {m["id"] for m in current_models if "id" in m}
-
-        # Add ONLY new models
-        for model in fetched_models:
-            if model.id not in existing_ids:
-                # Convert dataclass to dict
-                model_dict = {
-                    "id": model.id,
-                    "name": model.name,
-                    "description": model.description,
-                    "context_window": model.context_window,
-                }
-                # Remove empty fields to keep YAML clean
-                if not model_dict["description"]:
-                    del model_dict["description"]
-
-                current_models.append(model_dict)
-                changes_made = True
-
-    # Save back if changes were made
-    if changes_made:
-        # Add metadata comment
-        if "_meta" not in user_config:
-            user_config["_meta"] = {}
-        user_config["_meta"]["last_updated"] = datetime.now().isoformat()
-
-        try:
-            with open(config_path, "w", encoding="utf-8") as f:
-                yaml.dump(user_config, f, sort_keys=False, allow_unicode=True)
-            logger.info("Updated providers.yaml with new models")
-        except Exception as e:
-            logger.error(f"Failed to write providers.yaml: {e}")
+    user_config.setdefault("_meta", {})["last_updated"] = datetime.now().isoformat()
+    try:
+        with config_path.open("w", encoding="utf-8") as fh:
+            yaml.dump(user_config, fh, sort_keys=False, allow_unicode=True)
+        logger.info("Updated %s with new models", config_path)
+        # Invalidate the in-process providers cache so the wizard and
+        # any other callers immediately see the newly discovered models.
+        from inkarms.config.providers import clear_providers_cache
+        clear_providers_cache()
+    except Exception as exc:
+        logger.error("Failed to write %s: %s", config_path, exc)
