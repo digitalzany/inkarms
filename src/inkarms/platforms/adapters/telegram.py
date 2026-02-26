@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 try:
     from telegram import Bot, Update
     from telegram.constants import ChatAction, ParseMode
-    from telegram.error import RetryAfter, TelegramError
+    from telegram.error import RetryAfter, TelegramError, TimedOut
     from telegram.ext import Application, CommandHandler, MessageHandler, filters
     TELEGRAM_AVAILABLE = True
 except ImportError:
@@ -111,7 +111,7 @@ class TelegramAdapter(PlatformAdapter):
         supports_typing_indicator=True,
         supports_message_editing=True,
         markdown_flavor="HTML",
-        max_message_length=4096,
+        max_message_length=4000,
     )
 
     @property
@@ -247,7 +247,7 @@ class TelegramAdapter(PlatformAdapter):
                     platform_user, command, args, channel_id, message_id,
                 )
                 if reply:
-                    max_len = self.CAPABILITIES.max_message_length or 4096
+                    max_len = self.CAPABILITIES.max_message_length or 4000
                     if len(reply) > max_len:
                         await self._send_split_message(
                             str(message.chat_id), reply, None, message.message_id,
@@ -433,11 +433,26 @@ class TelegramAdapter(PlatformAdapter):
         if not self._bot:
             raise RuntimeError("Bot not initialized")
 
-        # Throttle edits to avoid Telegram flood control (3 s ≈ 20 edits/min per chat)
+        # Throttle edits to avoid Telegram flood control (~20 edits/min per chat ≈ 3 s minimum).
         now = time.monotonic()
         last_edit = self._last_stream_edit.get(destination_id, 0)
-        if not chunk.is_final and message_id is not None and (now - last_edit) < self._stream_edit_interval:
-            return message_id  # Skip this edit, too soon
+
+        if message_id is not None:
+            time_since_last = now - last_edit
+            if chunk.is_final:
+                # Must deliver the final response — proactively wait until it is safe.
+                # Two cases:
+                #   1. last_edit is in the future (RetryAfter pushed it there): wait until
+                #      the flood control window expires plus a small buffer.
+                #   2. last_edit is in the past but recent: wait out the minimum safe interval
+                #      so we don't trigger flood control right after an intermediate edit.
+                _min_edit_interval = 3.0
+                if last_edit > now:
+                    await asyncio.sleep(last_edit - now + 0.5)
+                elif time_since_last < _min_edit_interval:
+                    await asyncio.sleep(_min_edit_interval - time_since_last)
+            elif time_since_last < self._stream_edit_interval:
+                return message_id  # Skip this non-final edit, too soon
 
         max_len = self.CAPABILITIES.max_message_length or 4096
         formatted_content = self.format_output(chunk.content, "markdown")
@@ -447,6 +462,8 @@ class TelegramAdapter(PlatformAdapter):
             if not chunk.is_final:
                 return message_id or ""
             formatted_content = chunk.content  # raw text fallback for final chunk
+            if not formatted_content.strip():
+                return message_id or ""  # nothing to deliver
 
         # Handle final overflow (message exceeds Telegram's length limit)
         if len(formatted_content) > max_len:
@@ -495,9 +512,50 @@ class TelegramAdapter(PlatformAdapter):
                     logger.error(f"Failed to deliver final chunk after flood control wait: {retry_err}")
             return message_id or ""
 
+        except TimedOut:
+            if chunk.is_final:
+                # Final chunk must be delivered — retry once with a longer pause.
+                logger.warning(f"Telegram API timed out ({destination_id}) on final chunk, retrying in 2s")
+                await asyncio.sleep(2.0)
+                try:
+                    result = await self._send_or_edit_chunk(
+                        destination_id, formatted_content, fallback_text, message_id,
+                    )
+                    self._last_stream_edit[destination_id] = time.monotonic()
+                    return result
+                except TelegramError as retry_err:
+                    if "message is not modified" not in str(retry_err).lower():
+                        logger.error(f"Failed to send streaming chunk: {retry_err}")
+            else:
+                # Intermediate chunk — content will be included in the next successful edit.
+                logger.debug(f"Telegram intermediate chunk timed out ({destination_id}), skipping")
+            return message_id or ""
+
         except TelegramError as e:
-            if "message is not modified" not in str(e).lower():
-                logger.error(f"Failed to send streaming chunk: {e}")
+            err_str = str(e)
+            if "message is not modified" in err_str.lower():
+                return message_id or ""
+            # Telegram sometimes returns flood control as a plain TelegramError instead of
+            # RetryAfter. Detect it by the "Retry in N seconds" suffix and retry for final chunks.
+            if chunk.is_final:
+                flood_match = re.search(r"retry in (\d+) seconds", err_str, re.IGNORECASE)
+                if flood_match:
+                    wait_secs = int(flood_match.group(1)) + 1
+                    logger.warning(
+                        f"Flood control TelegramError on final chunk ({destination_id}), "
+                        f"waiting {wait_secs}s and retrying"
+                    )
+                    await asyncio.sleep(wait_secs)
+                    try:
+                        result = await self._send_or_edit_chunk(
+                            destination_id, formatted_content, fallback_text, message_id,
+                        )
+                        self._last_stream_edit[destination_id] = time.monotonic()
+                        return result
+                    except TelegramError as retry_err:
+                        logger.error(f"Failed to deliver final chunk after flood control: {retry_err}")
+                    return message_id or ""
+            logger.error(f"Failed to send streaming chunk: {e}")
             return message_id or ""
 
     async def _send_or_edit_chunk(

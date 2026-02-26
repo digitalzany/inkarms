@@ -206,7 +206,7 @@ async def _rate_limiter_cleanup_loop(router: MessageRouter) -> None:
         try:
             await asyncio.sleep(_RATE_LIMITER_CLEANUP_INTERVAL)
             if router._rate_limiter and hasattr(router._rate_limiter, "cleanup_old_buckets"):
-                router._rate_limiter.cleanup_old_buckets()
+                await router._rate_limiter.cleanup_old_buckets()
                 logger.debug("Rate-limiter cleanup complete")
         except asyncio.CancelledError:
             break
