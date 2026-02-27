@@ -56,11 +56,7 @@ async def start_hub(app_state: AppState) -> None:
         max_concurrent_tasks=config.platforms.max_concurrent_sessions,
         processor=processor,
         session_mapper=session_mapper,
-        rate_limiter=get_rate_limiter(
-            max_tokens=config.platforms.rate_limit_per_user,
-            refill_rate=1.0,
-            refill_interval=60.0,
-        ),
+        rate_limiter=get_rate_limiter(max_tokens=config.platforms.rate_limit_per_user),
         session_store=session_store,
     )
 
@@ -72,9 +68,6 @@ async def start_hub(app_state: AppState) -> None:
 
     # Replace internal listen tasks with supervised versions
     await _replace_with_supervised_listeners(router, adapters)
-
-    # Start periodic rate-limiter cleanup
-    asyncio.create_task(_rate_limiter_cleanup_loop(router))
 
     # Audit log
     audit = get_audit_logger()
@@ -153,7 +146,7 @@ async def _replace_with_supervised_listeners(
     We cancel those and create supervised replacements with crash-recovery.
     """
     # Cancel all existing listen tasks (they are named "listen-<platform>")
-    for task in list(router._tasks):
+    for task in router.get_tasks():
         if task.get_name().startswith("listen-"):
             task.cancel()
 
@@ -164,8 +157,8 @@ async def _replace_with_supervised_listeners(
             _supervised_listen(router, adapter),
             name=f"supervised-{adapter.platform_type.value}",
         )
-        router._tasks.add(task)
-        task.add_done_callback(router._tasks.discard)
+        router.add_task(task)
+        task.add_done_callback(router.remove_task)
 
 
 async def _supervised_listen(router: MessageRouter, adapter: Any) -> None:
@@ -200,20 +193,6 @@ async def _supervised_listen(router: MessageRouter, adapter: Any) -> None:
     logger.critical("Adapter %s failed after %d attempts — marked unhealthy", platform, _MAX_RETRIES)
 
 
-async def _rate_limiter_cleanup_loop(router: MessageRouter) -> None:
-    """Periodically clean up stale rate-limiter buckets to prevent memory growth."""
-    while True:
-        try:
-            await asyncio.sleep(_RATE_LIMITER_CLEANUP_INTERVAL)
-            if router._rate_limiter and hasattr(router._rate_limiter, "cleanup_old_buckets"):
-                await router._rate_limiter.cleanup_old_buckets()
-                logger.debug("Rate-limiter cleanup complete")
-        except asyncio.CancelledError:
-            break
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Rate-limiter cleanup error: %s", exc)
-
-
 async def _broadcast_shutdown() -> None:
     """Send {"type": "shutdown"} to all open /ws/events subscribers."""
     try:
@@ -228,7 +207,7 @@ async def _wait_for_idle(router: MessageRouter) -> None:
     """Wait until the router has no active handle tasks."""
     while True:
         active = sum(
-            1 for t in router._tasks if t.get_name().startswith("handle-")
+            1 for t in router.get_tasks() if t.get_name().startswith("handle-")
         )
         if active == 0:
             return

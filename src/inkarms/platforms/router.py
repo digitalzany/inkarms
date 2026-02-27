@@ -52,6 +52,15 @@ class MessageRouter:
         self._session_store = session_store or PlatformSessionStore()
         self._semaphore: asyncio.Semaphore | None = None
 
+    def add_task(self, task: asyncio.Task):
+        self._tasks.add(task)
+
+    def remove_task(self, task: asyncio.Task):
+        self._tasks.discard(task)
+
+    def get_tasks(self) -> list[asyncio.Task]:
+        return list(self._tasks)
+
     def register_adapter(self, adapter: PlatformAdapter) -> None:
         """Register a platform adapter with the router.
 
@@ -91,8 +100,8 @@ class MessageRouter:
                 task = asyncio.create_task(
                     self.listen_to_adapter(adapter), name=f"listen-{platform_name}"
                 )
-                self._tasks.add(task)
-                task.add_done_callback(self._tasks.discard)
+                self.add_task(task)
+                task.add_done_callback(self.remove_task)
                 logger.info(f"Started adapter for {platform_name}")
             except Exception as e:
                 logger.error(f"Failed to start adapter for {platform_name}: {e}")
@@ -140,8 +149,8 @@ class MessageRouter:
                     self._handle_message(adapter, message),
                     name=f"handle-{platform_name}-{message.message_id}",
                 )
-                self._tasks.add(task)
-                task.add_done_callback(self._tasks.discard)
+                self.add_task(task)
+                task.add_done_callback(self.remove_task)
 
         except asyncio.CancelledError:
             logger.info(f"Stopped listening to {platform_name}")
@@ -156,7 +165,8 @@ class MessageRouter:
         else:
             await self._process_message(adapter, message)
 
-    def _resolve_destination(self, message: IncomingMessage) -> str:
+    @staticmethod
+    def _resolve_destination(message: IncomingMessage) -> str:
         """Resolve the destination_id for sending replies."""
         return message.metadata.get("channel_id", message.user.platform_user_id)
 

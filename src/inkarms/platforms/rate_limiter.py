@@ -10,6 +10,7 @@ from collections import defaultdict
 from inkarms.models.platforms import PlatformType, PlatformUser
 
 logger = logging.getLogger(__name__)
+_RATE_LIMITER_CLEANUP_INTERVAL = 3600  # 1 hour
 
 
 class RateLimitExceeded(Exception):
@@ -68,6 +69,9 @@ class RateLimiter:
         self._platform_counters: dict[PlatformType, list[tuple[float, int]]] = defaultdict(list)
 
         self._lock = asyncio.Lock()
+
+        # Start periodic rate-limiter cleanup
+        asyncio.create_task(self._start_cleanup_loop())
 
     def set_platform_limit(self, platform: PlatformType, max_per_second: float | None) -> None:
         """Set rate limit for a specific platform.
@@ -231,6 +235,18 @@ class RateLimiter:
                 logger.info(f"Cleaned up {len(old_buckets)} old rate limit buckets")
 
             return len(old_buckets)
+
+    async def _start_cleanup_loop(self) -> None:
+        """Periodically clean up stale rate-limiter buckets to prevent memory growth."""
+        while True:
+            try:
+                await asyncio.sleep(_RATE_LIMITER_CLEANUP_INTERVAL)
+                await self.cleanup_old_buckets()
+                logger.debug("Rate-limiter cleanup complete")
+            except asyncio.CancelledError:
+                break
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Rate-limiter cleanup error: %s", exc)
 
 
 # Singleton instance
