@@ -5,184 +5,245 @@ All notable changes to InkArms will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.11.0] - Phase 1 Complete 🎉
+---
+
+## [Unreleased]
 
 ### Added
-- Initial project structure and CLI skeleton
-- Typer-based CLI with all command groups
-- Basic command structure for: run, config, skill, memory, status, audit, profile
-- Development tooling: ruff, mypy, pytest, pre-commit
-- Comprehensive documentation structure
-- **Configuration System (Milestone 1.2)**:
-  - Complete Pydantic configuration schema with validation
-  - Hierarchical configuration loading (global → profile → project → env)
-  - Deep merge with +/- array operations for list modification
-  - Environment variable overrides (INKARMS_* pattern)
-  - First-run setup (`inkarms config init`)
-  - Project configuration (`inkarms config init --project`)
-  - Profile creation (`inkarms config init --profile NAME`)
-  - Working CLI commands: show, set, edit, validate, init
-  - Configuration source tracking (`inkarms config show --sources`)
-- **Provider Layer (Milestone 1.3)**:
-  - LiteLLM integration for 100+ model support
-  - Multi-provider support (OpenAI, Anthropic, Google, Ollama, etc.)
-  - Automatic fallback chains with error classification
-  - Model name resolution (aliases, defaults)
-  - Encrypted secrets management (Fernet encryption)
-  - Cost tracking per session and model
-  - Provider health checking (`inkarms status health`)
-  - Working `inkarms run` command with streaming support
-  - Secrets CLI commands: set-secret, list-secrets, delete-secret
-- **Skills System (Milestone 1.4)**:
-  - Skill package format (SKILL.md + skill.yaml)
-  - Skill parsing with YAML frontmatter support
-  - Skill loading from global (~/.inkarms/skills/) and project (.inkarms/skills/) directories
-  - Keyword-based skill discovery index
-  - SkillManager for skill lifecycle management
-  - CLI commands: list, show, create, validate, install, remove, search, reindex
-  - Skill injection into system prompt via `--skill` flag
-  - Auto-skill discovery via `--auto-skill` flag
-  - 41 skill tests
-- **Context & Memory System (Milestone 1.5)**:
-  - Session management with conversation history
-  - Token counting with tiktoken (context window tracking)
-  - Context usage monitoring with thresholds
-  - Compaction strategies: summarize, truncate, sliding_window
-  - Handoff system for session continuity
-  - Memory storage: daily logs, snapshots, handoffs
-  - Session manager with auto-save
-  - CLI commands: list, show, snapshot, compact, handoff, recover, status, clear
-  - Context tracking integrated into `inkarms run`
-  - `--no-memory` and `--new-session` flags
-  - 40 memory tests
-- **Security & Sandbox (Milestone 1.6)**:
-  - Command filtering with whitelist/blacklist support
-  - Multiple sandbox modes: whitelist, blacklist, prompt, disabled
-  - Path restrictions to block access to sensitive directories
-  - Safe command execution with timeout support
-  - Audit logging with JSON Lines format
-  - Event types: command execution, queries, config changes, skills, sessions
-  - Log rotation and compression support
-  - Privacy features: query hashing, response filtering, path redaction
-  - Configurable buffering and flush intervals
-  - Integration with security configuration
-  - 46 security and audit tests
-  - 219 total passing tests
-- **Multi-Platform Messaging (Milestone 1.8)** - COMPLETE ✅:
-  - Platform adapter protocol with abstract interface
-  - Message router for concurrent multi-platform handling
-  - Platform-agnostic message processor
-  - Session mapper for (platform, user_id) → session_id mapping
-  - Token bucket rate limiter for abuse prevention
-  - Extended configuration schema with platform-specific settings
-  - **Telegram bot adapter** (long polling mode)
-  - **Slack adapter** (Socket Mode)
-  - **Discord adapter** (Gateway WebSocket)
-  - Platform connection modes: polling/WebSocket (no static IP required)
-  - Optional dependencies: python-telegram-bot, slack-sdk, discord.py
-  - Platform management CLI commands: start, stop, status
-  - 150+ platform tests
-  - ~370 total passing tests
-- **Tool Use & Agent Loop (Milestone 1.9)** - COMPLETE ✅:
-  - Tool registry and abstract Tool base class
-  - JSON schema generation for tool definitions
-  - 5 built-in tools: execute_bash, read_file, write_file, list_files, search_files
-  - Agent loop with iterative execution (AI → parse → execute → feedback)
-  - Tool call parser for Anthropic format
-  - Approval system: AUTO, MANUAL, DISABLED modes
-  - Tool filtering via whitelist/blacklist
-  - Integration with security sandbox (all tools execute through sandbox)
-  - Provider integration with tool use API support
-  - Extended configuration schema with agent settings
-  - CLI integration: `--tools` flag and `--tool-approval` mode
-  - Tool management commands: list, info, test
-  - 123 new tests (91 tool tests, 32 agent tests)
-  - 440 total passing tests
-- **Advanced Tool Use (Milestone 1.10)** - COMPLETE ✅:
-  - Platform integration with streaming tool execution updates
-  - HTTP request tool (GET/POST/PUT/DELETE with auth)
-  - Python eval tool (safe code execution with RestrictedPython)
-  - Git operations tool (status, commit, diff, log)
-  - Streaming support with real-time execution events
-  - Parallel tool execution using asyncio.gather()
-  - Tool metrics tracking (usage, execution time, success rates)
-- **TUI v1 (Milestone 1.7)** - COMPLETE ✅:
-  - Interactive chat interface with streaming responses
-  - Message display with Markdown rendering
-  - Tool execution indicators
-  - Session tracking (tokens, cost)
-  - Configuration wizard (QuickStart and Advanced modes)
-  - QuickStart wizard: Provider, API key, Security, Tools
-  - Advanced wizard: 8 comprehensive sections
-  - GitHub Copilot provider integration with OAuth device flow
-  - `inkarms chat` command for TUI chat
-  - `inkarms config init` for TUI configuration wizard
+- **`auto_discover_models` config flag** — `providers.auto_discover_models: false` (default off).
+  When enabled, InkArms fetches the live model list from each provider's API on startup and
+  merges newly-discovered models into `~/.inkarms/providers.yaml`. Exposed in the config wizard
+  (Provider Setup step). Set to `false` by default so users who manage a curated list are unaffected.
+- **OpenAI model discovery** — `_OpenAIFetcher` added to the background updater registry.
+  Non-chat model families (dall-e, whisper, tts, embeddings, etc.) are excluded automatically.
+  New chat model families are included without any code change.
+- **File logging** — `~/.inkarms/logs/inkarms.log` created at CLI startup via a rotating file
+  handler (10 MB per file, 3 backups). All `inkarms.*` loggers write at DEBUG level.
+- **Tools sub-menu in the Advanced config wizard** — Web Search is now grouped under a "Tools"
+  section (mirroring the "Platforms" pattern) rather than being a top-level Advanced menu item.
+- **Config wizard: model discovery toggle** — New "Model Discovery" screen in the Provider Setup
+  step lets users enable/disable `auto_discover_models` during wizard setup.
 
 ### Changed
-- Configuration schema updated to include platforms section
-- pyproject.toml updated with [platforms] optional dependencies
-- Version updated to 0.11.0 for Phase 1 completion
-- All Phase 1 milestones complete (1.1 through 1.10)
-- TUI configuration wizard with QuickStart and Advanced modes
-- GitHub Copilot added as provider option (GPT-5.2, Claude 4.5, Gemini 2.5, Grok 3)
-
-### Deprecated
-- Nothing yet!
-
-### Removed
-- Nothing yet!
+- **Background model updater now runs for all entry points** — `get_config()` spawns the updater
+  thread on first call (guarded by `_updater_started` flag), so model discovery fires
+  automatically when starting the CLI, the hub daemon, or platform adapters. Previously it only
+  ran from `RichBackend.initialize()`.
+- **Model reloads immediately after wizard save** — Saving the config wizard now clears the
+  config cache and reloads the active model in the current UI session. No restart needed.
 
 ### Fixed
-- Nothing yet!
-
-### Security
-- Nothing yet!
+- **Audit log path** — Default path corrected from `~/.inkarms/audit.jsonl` to
+  `~/.inkarms/audit/audit.jsonl` across the schema, documentation, and example configs.
+- **Audit logger: buffered events lost on exit** — Added `atexit.register(self.flush)` so the
+  in-memory buffer is always flushed when the process exits.
+- **Audit logger not wired to sandbox** — Both sandbox call sites (`run.py` and `backend.py`)
+  now pass `get_audit_logger()` to `SandboxExecutor.from_config()`.
+- **Config wizard Back button stuck at first step** — When the history stack was empty,
+  the engine now resets to the WelcomeStep so users can switch between Quick/Advanced modes.
+- **Background model updater: wrong secret key lookup** — `_get_api_key()` now tries the
+  provider ID first (e.g. `"anthropic"`, as stored by the wizard) before falling back to the
+  lower-cased env-var name. Previously no keys were found, so the updater silently did nothing.
+- **Providers cache not cleared after model discovery** — `_update_user_config()` now calls
+  `clear_providers_cache()` after writing `providers.yaml`, so the config wizard immediately
+  shows newly-discovered models.
+- **"Configuration saved" appearing in chat** — Summary and Advanced menu save confirmations
+  now log at INFO level instead of calling `display_info()`, keeping the chat view clean.
+- **Telegram: `/models` command replied with "Message is too long"** — `_handle_command()`
+  now routes responses longer than 4096 characters through `_send_split_message()`.
 
 ---
 
-## [0.1.0]
+## [0.11.0] - 2026-02-24
 
 ### Added
-- 🐙 InkArms is born!
-- Project structure following design specifications
-- CLI skeleton with Typer
-- Command groups: run, config, skill, memory, status, audit, profile
-- Placeholder implementations for all commands
-- pyproject.toml with full dependency specification
-- Development tooling configuration (ruff, mypy, pytest)
-- Pre-commit hooks
-- Test infrastructure with pytest fixtures
-- Documentation:
-  - README.md with project philosophy
-  - User Guide
-  - Configuration Reference
-  - Skill Authoring Guide
-  - CLI Reference
-  - Contributing Guide
 
-### Technical Details
+#### Configuration Wizard (Engine Refactor)
+- **`WizardEngine`** — Drives wizard step flow with a history-stack for back navigation.
+  After the WelcomeStep sets the mode, only applicable steps run. Back at step zero restarts
+  from WelcomeStep so the user can switch Quick ↔ Advanced.
+- **`WizardStep` ABC** — Abstract base class for all steps. Each step declares `step_key`,
+  optional `modes` restriction, and `run()`. Adding a new step is one file + one line in
+  `build_steps()`.
+- **Modular step registry** — Ten step files under `config/wizard/steps/`:
+  `welcome`, `provider`, `security`, `tool_secrets`, `tools`, `agent`, `context`, `cost`,
+  `hub`, `platforms`, `advanced_menu`, `summary`.
+- **Advanced mode non-linear menu** (`AdvancedMenuStep`) — Section picker that shows current
+  values inline. Users jump into any section, configure it, and return without losing changes.
+  Sections: Provider, Security, Tools, Agent, Context, Cost, Hub, Platforms.
+- **Platform tokens encrypted via SecretsManager** — Keys stored under
+  `<platform>_<field>` (e.g. `telegram_token`), never in plaintext config.
+
+#### Background Model Discovery
+- **Model updater refactored** (`config/updater.py`) — Extensible ABC registry pattern:
+  `_HttpFetcher` base class for remote providers, `_LocalFetcher` for local services.
+  Adding a new provider is one subclass + one registry entry.
+- **Anthropic model discovery** — Fetches live model list via `/v1/models`.
+- **Gemini model discovery** — Fetches via Google AI REST API (key in query param).
+- **Ollama model discovery** — Lists locally-running models via the `ollama` Python package
+  (imported lazily; skipped if not installed).
+- **Provider model merging** — Discovered models are appended to `~/.inkarms/providers.yaml`
+  (new IDs only; existing entries are never modified or removed). The in-process cache is
+  invalidated after each write.
+
+#### Hub Daemon
+- **FastAPI daemon** (`inkarms hub start/stop/status/restart`) on `127.0.0.1:18750` by default.
+  Runs as a background process tracked by a PID file.
+- **System service install** (`inkarms hub install`) — Installs as a launchd/systemd service
+  for auto-start at login.
+- **REST API endpoints**:
+  - `GET /api/status` — Daemon health, uptime, platform status
+  - `GET /api/sessions`, `POST /api/sessions` — Session management
+  - `GET /api/budget` — Daily/weekly/monthly cost totals
+  - `GET/POST/DELETE /api/cron` — Manage scheduled jobs
+  - `POST /triggers/{name}` — Fire AI actions from HTTP sources (GitHub, CI, etc.)
+  - `GET/POST /api/platforms` — Platform adapter control
+- **WebSocket endpoints**:
+  - `/ws/chat/{session_id}` — Streaming chat with full agent/tool execution
+  - `/ws/events` — Server-sent events for real-time status updates
+  - `/ws/logs` — Live log streaming
+- **Cron scheduler** — Schedule bash commands or AI queries with cron expressions or
+  plain intervals (`"every 5m"`, `"every 1h"`). Configurable tool approval mode.
+- **Webhook triggers** — Named HTTP routes that fire AI agent actions. Supports HMAC-SHA256
+  signature verification and `{body.x.y}` / `{headers.x}` template placeholders.
+- **Budget enforcement** — In-memory daily/weekly/monthly cost limits with sub-millisecond
+  enforcement. Synced to SQLite at configurable intervals.
+- **Authentication** — Bearer token (`Authorization: Bearer <key>`) or `X-InkArms-Key` header.
+  Localhost trusted by default (`trust_localhost: true`). IP-based rate limiting with lockout.
+- **OpenAI-compatible proxy** — `/v1/chat/completions` for drop-in use with Continue.dev,
+  Open WebUI, or any OpenAI-compatible client.
+- **Auto-start platforms** — Hub starts all enabled platform adapters on launch; they restart
+  automatically on crash.
+- **SQLite persistence** (`~/.inkarms/hub.db`) — Budget history, cron job state, audit events.
+
+#### Reasoning Context Support
+- **`reasoning_content` field** — Agent client, session manager, and platform adapters all
+  carry `reasoning_content` alongside `content` for thinking-capable models (e.g.
+  `claude-3-7-sonnet`, `deepseek-r1`).
+- **`normalize_reasoning_content()`** — Handles Anthropic `thinking` blocks and OpenAI
+  `reasoning_content` fields uniformly.
+- **Streaming preservation** — Reasoning content is accumulated during streaming and included
+  in the final message object.
+- **Platform and UI display** — Telegram, Slack, Discord, and the Rich TUI all surface
+  reasoning content when present.
+
+#### Web Search Tool
+- **`BraveSearchTool`** — Integrates with the Brave Search API. API key stored encrypted
+  via SecretsManager. Configured in the wizard under Tools → Web Search.
+
+#### Rich TUI
+- **`inkarms` launches the interactive UI directly** (no subcommand required).
+- **Chat view** — Streaming responses, full Markdown rendering, syntax-highlighted code blocks,
+  timestamps, tool execution panels (green/red/yellow borders by status).
+- **Agent mode** — Real-time status line ("Running execute_bash..."), inline tool approval
+  prompts (`a` allow, `d` deny, `A` allow all for session).
+- **Dashboard view** — Session stats, provider status, recent sessions.
+- **Sessions view** — Create, switch, and manage named conversation sessions.
+- **Session persistence** — Active session restored on restart.
+- **Slash commands** with tab completion: `/help`, `/model`, `/agent`, `/tools`, `/compact`,
+  `/clear`, `/usage`, `/status`, `/save`, `/load`, `/history`, `/config`, `/menu`, `/quit`.
+- **Config wizard accessible from chat** via `/config` slash command.
+- **Status bar** — Provider, model, token count, cost, tools summary.
+
+#### Configuration System
+- **Hierarchical loading** — Global (`~/.inkarms/config.yaml`) → Profile → Project
+  (`.inkarms/project.yaml`) → Environment variables (`INKARMS_*`).
+- **Deep merge with `+`/`-` list operators** — Append or remove items in arrays without
+  replacing the whole list.
+- **`ProviderConfig.auto_discover_models`** — Enable/disable background model discovery
+  (default: `false`).
+- **`providers.yaml` defaults** — Bundled model catalogue for Anthropic, OpenAI, Gemini,
+  GitHub Copilot, Ollama. User overrides merged from `~/.inkarms/providers.yaml`.
+- **`ProvidersProxy`** — Lazy-loading dict proxy; provider data loaded on first access.
+- **`clear_providers_cache()`** — Invalidates the in-process provider cache for hot reload.
+
+#### Security
+- **Structured blacklist** (`BlacklistConfig`) — Organised by category: single-word commands,
+  multi-word patterns, sensitive paths, dangerous redirects, container patterns,
+  command substitutions, DoS patterns, pipe-to-interpreters.
+- **Bundled defaults** (`config/defaults/security.yaml`) — Opinionated safe defaults loaded
+  at startup.
+- **Audit logger buffer** — Configurable `buffer_size` and `flush_interval_seconds`.
+  Events flushed to disk on a background thread.
+
+#### Provider Layer
+- **LiteLLM integration** — 100+ models across Anthropic, OpenAI, Google, Ollama,
+  OpenRouter, GitHub Copilot, and others.
+- **Fallback chains** — Automatic failover to the next provider on error.
+- **Model aliases** — Short names (`fast`, `local`, etc.) resolved at request time.
+- **Cost tracking** — Per-session and cumulative cost visible in the status bar and `/usage`.
+- **Encrypted secrets** — Fernet encryption; keys stored in `~/.inkarms/secrets/`.
+- **GitHub Copilot** — OAuth device-flow authentication; model catalogue includes GPT-4o,
+  Claude 4.x, Gemini 2.x, and Grok 3.
+
+#### Memory & Context
+- **Session management** — Conversation history with token tracking via tiktoken.
+- **Compaction strategies** — `summarize` (AI-generated summary), `truncate`, `sliding_window`.
+  Auto-triggered at configurable context fill threshold (default 70%).
+- **Handoff system** — Saves state to `HANDOFF.md` at 85% fill for clean session handoff.
+- **Storage** — Daily logs, named snapshots, handoff documents under `~/.inkarms/memory/`.
+- **Session chains** — Group channels (e.g. `cli` + `telegram`) to share a session.
+
+#### Skills
+- **Skill package format** — `SKILL.md` (instructions) + `skill.yaml` (metadata, keywords,
+  permissions) in a named directory.
+- **Skill discovery** — Keyword-indexed auto-discovery via `--auto-skill`. Explicit load via
+  `--skill <name>`.
+- **Global and project-local skills** — `~/.inkarms/skills/` overridden by `.inkarms/skills/`.
+- **CLI** — `inkarms skill list/show/create/validate/install/remove/search/reindex`.
+
+#### Tools & Agent Loop
+- **Built-in tools** — `execute_bash` (sandboxed), `read_file`, `write_file`, `list_files`,
+  `search_files`, `http_request`, `python_eval` (RestrictedPython), `git_operations`,
+  `brave_search`.
+- **Agent loop** — Iterates: call LLM → parse tool calls → execute → feed results back.
+  Configurable max iterations and per-iteration timeout.
+- **Approval modes** — `auto` (all tools run), `manual` (dangerous tools need confirmation),
+  `disabled` (no tools).
+- **Parallel tool execution** — Multiple tool calls in a single LLM turn run concurrently
+  via `asyncio.gather()`.
+
+#### Platforms
+- **Telegram** adapter — Long polling. Supports `allowed_users`, HTML and MarkdownV2 parse
+  modes, long-message splitting at sentence boundaries.
+- **Slack** adapter — Socket Mode (persistent WebSocket; no public URL required).
+- **Discord** adapter — Gateway WebSocket connection.
+- **Platform-agnostic command registry** — Slash commands (`/help`, `/model`, `/usage`,
+  `/status`, `/models`, `/clear`, `/compact`, `/tools`) shared by all platform adapters.
+- **Rate limiting** — Token bucket per user, configurable messages-per-minute.
+- **Session mapper** — Maps `(platform, user_id)` to session IDs for conversation continuity.
+
+### Removed
+- **`inkarms audit` CLI command** — Removed (unimplemented placeholder).
+- **`inkarms profile` CLI command** — Removed (unimplemented placeholder).
+- **`inkarms status` CLI command** — Removed (unimplemented placeholder).
+- **`inkarms chat` CLI command** — Removed; `inkarms` (no subcommand) now launches the UI.
+- **Textual backend** — Removed. Rich + prompt_toolkit is the only supported UI backend.
+- **`DeepThinkingConfig`, `TaskRoutingConfig`** — Removed dead config classes.
+- **`--task` and `--deep` CLI flags** — Removed (were print-only stubs).
+
+---
+
+## [0.1.0] - 2026-02-07
+
+### Added
+- Initial project structure with Typer-based CLI skeleton
+- Command groups: `run`, `config`, `skill`, `memory`, `hub`, `platforms`, `tools`, `status`
+- pyproject.toml with full dependency specification and optional extras (`[platforms]`, `[hub]`, `[all]`)
+- Development tooling: ruff, mypy, pytest, pre-commit hooks
+- Documentation structure: User Guide, Configuration Reference, CLI Reference, Security Guide,
+  Skill Authoring Guide, Hub Guide, Platform Setup Guide
 - Python 3.11+ required
-- Dependencies: typer, textual, litellm, pydantic, pyyaml, rich, httpx, tiktoken, cryptography
-- Package installable via `pip install -e .`
-- Entry point: `inkarms` command
 
 ---
 
 ## Version History
 
-| Version | Date | Milestone |
-|---------|--|-----------|
-| 0.1.0 |  | Project Setup (Phase 1, Milestone 1.1) |
-| 0.2.0 |  | Configuration System (Phase 1, Milestone 1.2) |
-| 0.3.0 |  | Provider Layer (Phase 1, Milestone 1.3) |
-| 0.4.0 |  | Basic Skills (Phase 1, Milestone 1.4) |
-| 0.5.0 |  | Context & Memory (Phase 1, Milestone 1.5) |
-| 0.6.0 |  | Security & Sandbox (Phase 1, Milestone 1.6) |
-| 0.7.0 |  | TUI v1 (Phase 1, Milestone 1.7) ✅ |
-| 0.8.0 |  | Multi-Platform Adapters (Phase 1, Milestone 1.8) ✅ |
-| 0.9.0 |  | Tool Use & Agent Loop (Phase 1, Milestone 1.9) ✅ |
-| 0.10.0 |  | Advanced Tool Use (Phase 1, Milestone 1.10) ✅ |
-| 0.11.0 |  | **Phase 1 Complete** - TUI Enhancements + GitHub Copilot ✅ |
+| Version | Date | Highlights |
+|---------|------|------------|
+| Unreleased | — | Model discovery flag, audit fixes, updater improvements |
+| 0.11.0 | 2026-02-24 | Hub daemon, reasoning support, wizard engine refactor, model discovery |
+| 0.1.0 | 2026-02-07 | Initial project setup |
 
 ---
 
